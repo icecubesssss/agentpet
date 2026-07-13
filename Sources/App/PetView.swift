@@ -67,8 +67,14 @@ struct FloatingPetView: View {
     var body: some View {
         VStack(spacing: 2) {
             if pet.showChat && model.petID != nil {
-                // Agent rows (working) or idle chatter. The chatter is hidden
-                // while a task list is up so the two bubbles don't clutter.
+                // Task list on top — the persistent reminder.
+                if !model.titroutineTasks.isEmpty {
+                    TaskBubble(tasks: model.titroutineTasks)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
+                }
+                // Below it: agent rows (working) or idle chatter. Chatter is
+                // hidden while a task list is up so the two bubbles don't clutter.
                 if bubbleSettings.multiAgentBubbleEnabled && !model.sessions.isEmpty {
                     AgentBubble(sessions: model.sessions)
                         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -76,13 +82,6 @@ struct FloatingPetView: View {
                 } else if !model.chatLine.isEmpty && model.titroutineTasks.isEmpty {
                     ChatBubble(text: model.chatLine,
                                projectName: pet.splitPet ? model.projectName : nil)
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
-                }
-                // Task list — shown whenever there's unfinished work, stacked with
-                // the agent rows so both features run side by side.
-                if !model.titroutineTasks.isEmpty {
-                    TaskBubble(tasks: model.titroutineTasks)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
                 }
