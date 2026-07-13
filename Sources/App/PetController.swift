@@ -253,6 +253,15 @@ final class PetController: ObservableObject {
         syncWindows()
     }
 
+    /// Outstanding Titroutine habits/tasks shown as a structured list on the home
+    /// pet (empty = none). Persists across window syncs and yields to live agent
+    /// rows automatically — so it never fights the idle chatter for `chatLine`.
+    private(set) var titroutineTasks: [String] = []
+    func setTitroutineTasks(_ titles: [String]) {
+        titroutineTasks = titles
+        syncWindows()
+    }
+
     private func setMood(_ newMood: PetMood) {
         let changed = newMood != mood
         mood = newMood
@@ -513,12 +522,16 @@ final class PetController: ObservableObject {
             lineCount = spec.count
             resolvedLine = chatLine(forMood: spec.mood, sessions: groupSessions, petID: spec.petID)
         }
+        // Show the Titroutine list only on the home pet while it has no live
+        // agent rows; agents always take precedence in their window.
+        let showTasks = spec.key == PetWindowPlanner.defaultKey && groupSessions.isEmpty
         return PetWindowController.WindowState(
             petID: petID,
             mood: spec.mood,
             sessions: groupSessions,
             count: lineCount,
-            chatLine: resolvedLine
+            chatLine: resolvedLine,
+            titroutineTasks: showTasks ? titroutineTasks : []
         )
     }
 }

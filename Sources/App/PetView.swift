@@ -71,6 +71,10 @@ struct FloatingPetView: View {
                     AgentBubble(sessions: model.sessions)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
+                } else if !model.titroutineTasks.isEmpty {
+                    TaskBubble(tasks: model.titroutineTasks)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
                 } else if !model.chatLine.isEmpty {
                     ChatBubble(text: model.chatLine,
                                projectName: pet.splitPet ? model.projectName : nil)
@@ -904,6 +908,64 @@ private struct AgentRow: View {
 /// Theme-aware (light/dark/system); reused by the Settings live preview.
 /// When `projectName` is non-nil (split-pet mode), a small dimmed caption is
 /// rendered above the main text so the window is identifiable.
+// MARK: - Task Bubble (structured list of unfinished Titroutine work)
+
+/// Speech bubble listing outstanding habits/tasks, one per row — the same
+/// structured feel as the multi-agent bubble, but for Titroutine reminders.
+struct TaskBubble: View {
+    let tasks: [String]
+    @ObservedObject private var settings = BubbleSettings.shared
+
+    private var fill: Color {
+        switch settings.theme {
+        case .light:  return Color.white.opacity(settings.opacity)
+        case .dark:   return Color(nsColor: .windowBackgroundColor).opacity(settings.opacity)
+        case .system: return Color(nsColor: .textBackgroundColor).opacity(settings.opacity)
+        }
+    }
+    private var textColor: Color {
+        switch settings.theme {
+        case .light:  return .black.opacity(0.85)
+        case .dark:   return .white.opacity(0.85)
+        case .system: return Color.primary.opacity(0.85)
+        }
+    }
+    private var borderColor: Color {
+        switch settings.theme {
+        case .light:  return .black.opacity(0.06)
+        case .dark:   return .white.opacity(0.12)
+        case .system: return Color.primary.opacity(0.08)
+        }
+    }
+
+    var body: some View {
+        let shown = Array(tasks.prefix(5))
+        let extra = tasks.count - shown.count
+        VStack(alignment: .leading, spacing: 3) {
+            Text("🐰 Còn \(tasks.count) việc chưa xong nè!")
+                .font(.system(size: settings.fontSize.primaryPt, weight: .semibold))
+                .foregroundStyle(textColor)
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, t in
+                Text("• \(t)")
+                    .font(.system(size: settings.fontSize.secondaryPt, weight: .regular))
+                    .foregroundStyle(textColor.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            if extra > 0 {
+                Text("… và \(extra) việc nữa")
+                    .font(.system(size: settings.fontSize.secondaryPt, weight: .regular))
+                    .foregroundStyle(textColor.opacity(0.5))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: 240, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(fill))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(borderColor, lineWidth: 1))
+    }
+}
+
 struct ChatBubble: View {
     let text: String
     var projectName: String? = nil

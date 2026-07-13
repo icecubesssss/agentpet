@@ -94,6 +94,7 @@ final class PetWindowController: ObservableObject {
         var sessions: [AgentSession]
         var count: Int
         var chatLine: String
+        var titroutineTasks: [String] = []
     }
 
     /// Reconciles the live panels with the planned specs. Existing keys update
@@ -126,6 +127,7 @@ final class PetWindowController: ObservableObject {
         model.sessions = state.sessions
         model.count = state.count
         model.chatLine = state.chatLine
+        model.titroutineTasks = state.titroutineTasks
     }
 
     // MARK: - Window lifecycle
