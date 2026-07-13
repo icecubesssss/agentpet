@@ -245,10 +245,16 @@ private struct GeneralTab: View {
     @ObservedObject private var sound = SoundSettings.shared
     @ObservedObject private var appLang = AppLanguage.shared
     @ObservedObject private var breaks = BreakReminderSettings.shared
+    @ObservedObject private var titro = TitroutineSettings.shared
     // Local mirror of the system login-item state so the toggle re-renders
     // reliably (the SMAppService status isn't observable on its own).
     @State private var launchAtLogin = LoginItem.isEnabled
     @State private var showCodexHelp = false
+    // Titroutine connect form state.
+    @State private var titroEmail = ""
+    @State private var titroPassword = ""
+    @State private var titroError: String?
+    @State private var titroBusy = false
 
     var body: some View {
         Form {
@@ -326,6 +332,46 @@ private struct GeneralTab: View {
                         value: $breaks.breakLengthMinutes, in: 1...30, step: 1)
                     .disabled(!breaks.enabled)
                     .opacity(breaks.enabled ? 1 : 0.5)
+            }
+
+            Section("Titroutine reminders") {
+                if titro.isConnected {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Remind me of unfinished habits & tasks")
+                            Text("The pet nudges you about work still open in Titroutine.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        ColorSwitch(isOn: $titro.enabled)
+                    }
+                    Stepper("Check every: \(titro.reminderIntervalMinutes) min",
+                            value: $titro.reminderIntervalMinutes, in: 1...240, step: 1)
+                        .disabled(!titro.enabled)
+                        .opacity(titro.enabled ? 1 : 0.5)
+                    HStack {
+                        Text("Connected as \(titro.connectedEmail ?? "")")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Disconnect") { TitroutineClient.shared.signOut() }
+                    }
+                } else {
+                    Text("Point this at your habit tracker's Supabase, then sign in. The URL + key are the public NEXT_PUBLIC_SUPABASE_* values from your web app's env (safe to paste — row-level security still restricts data to you).")
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextField("Supabase URL (https://xxxx.supabase.co)", text: $titro.supabaseURL)
+                    TextField("Anon (public) key", text: $titro.anonKey)
+                    Divider()
+                    TextField("Account email", text: $titroEmail)
+                    SecureField("Password", text: $titroPassword)
+                    if let titroError {
+                        Text(titroError).font(.caption).foregroundStyle(.red)
+                    }
+                    HStack {
+                        Spacer()
+                        Button(titroBusy ? "Connecting…" : "Connect") { connectTitroutine() }
+                            .disabled(titroBusy || !titro.isConfigured || titroEmail.isEmpty || titroPassword.isEmpty)
+                    }
+                }
             }
 
             Section("Notifications") {
@@ -408,6 +454,22 @@ private struct GeneralTab: View {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         return "\(v) (\(b))"
+    }
+
+    /// Sign in to Titroutine, then turn reminders on and clear the password field.
+    private func connectTitroutine() {
+        titroBusy = true
+        titroError = nil
+        Task {
+            do {
+                try await TitroutineClient.shared.signIn(email: titroEmail, password: titroPassword)
+                titroPassword = ""
+                titro.enabled = true
+            } catch {
+                titroError = error.localizedDescription
+            }
+            titroBusy = false
+        }
     }
 
     private var notificationTitle: String {
