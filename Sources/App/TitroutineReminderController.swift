@@ -50,7 +50,9 @@ final class TitroutineReminderController {
             defer { self.fetching = false }
             do {
                 let out = try await TitroutineClient.shared.fetchOutstanding()
-                PetController.shared.setTitroutineTasks(out.habitTitles + out.taskTitles)
+                // Tag each row so habits (🔁) and tasks (📋) are told apart.
+                let rows = out.habitTitles.map { "🔁 \($0)" } + out.taskTitles.map { "📋 \($0)" }
+                PetController.shared.setTitroutineTasks(rows)
                 if out.total == 0, self.lastTotal > 0 {
                     PetController.shared.flashReactiveLine("Xong hết việc rồi, giỏi ghê! 🐰✨")
                 }
