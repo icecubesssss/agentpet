@@ -43,13 +43,20 @@ final class TitroutineReminderController {
         }
     }
 
+    /// Nudge purely through the pet: a spoken chat bubble naming a couple of the
+    /// open items. No macOS notification — the reminder is meant to feel like the
+    /// pet chatting, not a system alert. A soft purr signals it spoke.
     private func nudge(_ out: TitroutineClient.Outstanding) {
         let n = out.total
-        let sample = (out.habitTitles + out.taskTitles).prefix(3).joined(separator: ", ")
-        NotificationManager.shared.notify(
-            title: n == 1 ? "1 thing still open in Titroutine" : "\(n) things still open in Titroutine",
-            body: sample.isEmpty ? "You have unfinished habits or tasks." : "Still to do: \(sample)")
+        let names = (out.habitTitles + out.taskTitles).prefix(2).joined(separator: ", ")
+        let line: String
+        if n == 1 {
+            line = "Còn “\(names)” chưa xong nè, làm nốt đi nha! 🐰"
+        } else {
+            let more = n > 2 ? " và \(n - 2) việc nữa" : ""
+            line = "Còn \(n) việc chưa xong nè: \(names)\(more) — cố lên nha! 🐰"
+        }
         NSSound(named: "Purr")?.play()
-        PetController.shared.flashReactiveLine("You've got \(n) unfinished — let's knock them out! 🐰")
+        PetController.shared.flashReactiveLine(line)
     }
 }
