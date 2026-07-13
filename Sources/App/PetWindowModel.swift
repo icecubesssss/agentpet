@@ -17,10 +17,9 @@ final class PetWindowModel: ObservableObject {
     @Published var sessions: [AgentSession]
     @Published var count: Int
     @Published var chatLine: String
-    /// Outstanding Titroutine habits/tasks to show as a structured list on the
-    /// home pet (empty = none). Rendered like the agent bubble, and shown only
-    /// when no live agent rows occupy this window.
-    @Published var titroutineTasks: [String]
+    /// Outstanding Titroutine rows (habits, to-dos, in-progress tasks) to show on
+    /// the home pet (empty = none). Rendered inside the agent bubble.
+    @Published var titroutineRows: [TitroutineRow]
 
     init(
         key: String,
@@ -30,7 +29,7 @@ final class PetWindowModel: ObservableObject {
         sessions: [AgentSession] = [],
         count: Int = 0,
         chatLine: String = "",
-        titroutineTasks: [String] = []
+        titroutineRows: [TitroutineRow] = []
     ) {
         self.key = key
         self.petID = petID
@@ -39,7 +38,7 @@ final class PetWindowModel: ObservableObject {
         self.sessions = sessions
         self.count = count
         self.chatLine = chatLine
-        self.titroutineTasks = titroutineTasks
+        self.titroutineRows = titroutineRows
     }
 
     // MARK: - Pet tap interaction (per window)

@@ -70,17 +70,17 @@ struct FloatingPetView: View {
                 // One bubble: agent rows + Titroutine task rows together (native
                 // multi-agent style). Falls back to the chat bubble for idle
                 // chatter, or a standalone task list when multi-agent is off.
-                if bubbleSettings.multiAgentBubbleEnabled && (!model.sessions.isEmpty || !model.titroutineTasks.isEmpty) {
-                    AgentBubble(sessions: model.sessions, tasks: model.titroutineTasks)
+                if bubbleSettings.multiAgentBubbleEnabled && (!model.sessions.isEmpty || !model.titroutineRows.isEmpty) {
+                    AgentBubble(sessions: model.sessions, rows: model.titroutineRows)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
-                } else if !model.chatLine.isEmpty && model.titroutineTasks.isEmpty {
+                } else if !model.chatLine.isEmpty && model.titroutineRows.isEmpty {
                     ChatBubble(text: model.chatLine,
                                projectName: pet.splitPet ? model.projectName : nil)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
-                } else if !model.titroutineTasks.isEmpty {
-                    TaskBubble(tasks: model.titroutineTasks)
+                } else if !model.titroutineRows.isEmpty {
+                    TaskBubble(rows: model.titroutineRows)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
                 }
@@ -160,7 +160,7 @@ struct AgentBubble: View {
     let sessions: [AgentSession]
     /// Optional Titroutine reminder rows appended below the agent rows, in the
     /// same bubble (empty = agents only).
-    var tasks: [String] = []
+    var rows: [TitroutineRow] = []
     var tailEdge: Edge = .bottom
     @ObservedObject private var settings = BubbleSettings.shared
 
@@ -224,7 +224,7 @@ struct AgentBubble: View {
     private var isPetChat: Bool { tailEdge == .bottom }
     // Capsule for single visible row; rounded rect when taller or carousel dots are shown.
     private var useCapsule: Bool {
-        isPetChat && groupedSessions.count <= 1 && tasks.isEmpty && settings.displayMode != .compact
+        isPetChat && groupedSessions.count <= 1 && rows.isEmpty && settings.displayMode != .compact
     }
 
     var body: some View {
@@ -308,24 +308,23 @@ struct AgentBubble: View {
             )
         }
         // Titroutine reminder rows, in the same bubble below the agent rows.
-        if !tasks.isEmpty {
+        if !rows.isEmpty {
             if !groupedSessions.isEmpty {
                 Rectangle().fill(textColor(0.12))
                     .frame(height: 1)
                     .padding(.vertical, 1)
             }
-            Text("🐰 Còn \(tasks.count) việc chưa xong nè!")
+            Text("🐰 Còn \(rows.count) việc chưa xong nè!")
                 .font(.system(size: settings.fontSize.primaryPt, weight: .semibold))
                 .foregroundStyle(textColor(0.85))
-            ForEach(Array(tasks.prefix(5).enumerated()), id: \.offset) { _, t in
-                Text("• \(t)")
-                    .font(.system(size: settings.fontSize.secondaryPt, weight: .regular))
-                    .foregroundStyle(textColor(0.8))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            ForEach(Array(rows.prefix(6).enumerated()), id: \.offset) { _, row in
+                TitroutineRowView(row: row,
+                                  fontPt: settings.fontSize.secondaryPt,
+                                  color: textColor(0.8),
+                                  dim: textColor(0.5))
             }
-            if tasks.count > 5 {
-                Text("… và \(tasks.count - 5) việc nữa")
+            if rows.count > 6 {
+                Text("… và \(rows.count - 6) việc nữa")
                     .font(.system(size: settings.fontSize.secondaryPt, weight: .regular))
                     .foregroundStyle(textColor(0.5))
             }
@@ -941,8 +940,48 @@ private struct AgentRow: View {
 
 /// Speech bubble listing outstanding habits/tasks, one per row — the same
 /// structured feel as the multi-agent bubble, but for Titroutine reminders.
+/// One reminder row. In-progress tasks (startedAt != nil) get a live elapsed
+/// timer that ticks every second, like a running agent; others are static.
+struct TitroutineRowView: View {
+    let row: TitroutineRow
+    let fontPt: CGFloat
+    let color: Color
+    let dim: Color
+
+    var body: some View {
+        if let start = row.startedAt {
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                let elapsed = max(0, ctx.date.timeIntervalSince(start))
+                let target = row.targetMinutes > 0 ? String(format: " / %d:00", row.targetMinutes) : ""
+                HStack(spacing: 4) {
+                    Text("\(row.icon) \(row.title)")
+                        .foregroundStyle(color)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(Self.clock(elapsed) + target)
+                        .foregroundStyle(dim)
+                        .monospacedDigit()
+                        .fixedSize()
+                }
+                .font(.system(size: fontPt, weight: .regular))
+            }
+        } else {
+            Text("\(row.icon) \(row.title)")
+                .font(.system(size: fontPt, weight: .regular))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    private static func clock(_ t: TimeInterval) -> String {
+        let s = Int(t)
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
 struct TaskBubble: View {
-    let tasks: [String]
+    let rows: [TitroutineRow]
     @ObservedObject private var settings = BubbleSettings.shared
 
     private var fill: Color {
@@ -968,18 +1007,17 @@ struct TaskBubble: View {
     }
 
     var body: some View {
-        let shown = Array(tasks.prefix(5))
-        let extra = tasks.count - shown.count
+        let shown = Array(rows.prefix(6))
+        let extra = rows.count - shown.count
         VStack(alignment: .leading, spacing: 3) {
-            Text("🐰 Còn \(tasks.count) việc chưa xong nè!")
+            Text("🐰 Còn \(rows.count) việc chưa xong nè!")
                 .font(.system(size: settings.fontSize.primaryPt, weight: .semibold))
                 .foregroundStyle(textColor)
-            ForEach(Array(shown.enumerated()), id: \.offset) { _, t in
-                Text("• \(t)")
-                    .font(.system(size: settings.fontSize.secondaryPt, weight: .regular))
-                    .foregroundStyle(textColor.opacity(0.9))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, row in
+                TitroutineRowView(row: row,
+                                  fontPt: settings.fontSize.secondaryPt,
+                                  color: textColor.opacity(0.9),
+                                  dim: textColor.opacity(0.5))
             }
             if extra > 0 {
                 Text("… và \(extra) việc nữa")

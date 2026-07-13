@@ -256,9 +256,9 @@ final class PetController: ObservableObject {
     /// Outstanding Titroutine habits/tasks shown as a structured list on the home
     /// pet (empty = none). Persists across window syncs and yields to live agent
     /// rows automatically — so it never fights the idle chatter for `chatLine`.
-    private(set) var titroutineTasks: [String] = []
-    func setTitroutineTasks(_ titles: [String]) {
-        titroutineTasks = titles
+    private(set) var titroutineRows: [TitroutineRow] = []
+    func setTitroutineRows(_ rows: [TitroutineRow]) {
+        titroutineRows = rows
         syncWindows()
     }
 
@@ -531,7 +531,7 @@ final class PetController: ObservableObject {
             sessions: groupSessions,
             count: lineCount,
             chatLine: resolvedLine,
-            titroutineTasks: showTasks ? titroutineTasks : []
+            titroutineRows: showTasks ? titroutineRows : []
         )
     }
 }

@@ -1,5 +1,15 @@
 import Foundation
 
+/// One row of the Titroutine reminder list. `startedAt != nil` marks an
+/// in-progress task, drawn with a live elapsed timer like a running agent;
+/// `targetMinutes` is its focus goal. Habits/todos leave both at their default.
+struct TitroutineRow: Sendable, Equatable {
+    let icon: String
+    let title: String
+    var startedAt: Date? = nil
+    var targetMinutes: Int = 0
+}
+
 /// Talks to Titroutine's Supabase directly (GoTrue auth + PostgREST), so no
 /// changes are needed on the web side. Sign in once with the Titroutine
 /// email/password; the refresh token is kept in the Keychain and access tokens
@@ -26,11 +36,11 @@ final class TitroutineClient: ObservableObject {
         }
     }
 
-    /// Outstanding work, titles only (for the reminder body).
+    /// Outstanding work as ready-to-render rows (in-progress tasks first, then
+    /// habits, then to-do tasks).
     struct Outstanding: Sendable {
-        var habitTitles: [String]
-        var taskTitles: [String]
-        var total: Int { habitTitles.count + taskTitles.count }
+        var rows: [TitroutineRow]
+        var total: Int { rows.count }
     }
 
     private static let refreshTokenAccount = "refreshToken"
@@ -120,7 +130,8 @@ final class TitroutineClient: ObservableObject {
 
     // MARK: - Data (habits + tasks not yet done)
 
-    /// Fetch outstanding habits (not completed today) and tasks (status != done).
+    /// Fetch outstanding habits (not completed today), in-progress tasks (with
+    /// their start time + focus goal, for the live timer) and to-do tasks.
     func fetchOutstanding() async throws -> Outstanding {
         let habits: [Row] = try await restGET(
             table: "habits",
@@ -132,14 +143,26 @@ final class TitroutineClient: ObservableObject {
             query: [.init(name: "select", value: "habit_id"),
                     .init(name: "date", value: "eq.\(Self.localToday())"),
                     .init(name: "is_completed", value: "eq.true")])
-        let tasks: [Row] = try await restGET(
+        let active: [ActiveRow] = try await restGET(
+            table: "tasks",
+            query: [.init(name: "select", value: "id,title,updated_at,focus_duration"),
+                    .init(name: "status", value: "eq.in_progress")])
+        let todos: [Row] = try await restGET(
             table: "tasks",
             query: [.init(name: "select", value: "id,title"),
-                    .init(name: "status", value: "neq.done")])
+                    .init(name: "status", value: "eq.todo")])
 
         let doneIDs = Set(doneLogs.map(\.habitId))
-        let habitTitles = habits.filter { !doneIDs.contains($0.id) }.map(\.title)
-        return Outstanding(habitTitles: habitTitles, taskTitles: tasks.map(\.title))
+        var rows: [TitroutineRow] = []
+        // In-progress tasks first — the "running" rows with a live timer.
+        rows += active.map {
+            TitroutineRow(icon: "⏱", title: $0.title,
+                          startedAt: Self.parseDate($0.updatedAt),
+                          targetMinutes: $0.focusDuration)
+        }
+        rows += habits.filter { !doneIDs.contains($0.id) }.map { TitroutineRow(icon: "🔁", title: $0.title) }
+        rows += todos.map { TitroutineRow(icon: "📋", title: $0.title) }
+        return Outstanding(rows: rows)
     }
 
     /// One PostgREST GET, decoding an array of `T`. Retries once after a token
@@ -174,6 +197,12 @@ final class TitroutineClient: ObservableObject {
     }
     private struct Row: Decodable { let id: String; let title: String }
     private struct LogRow: Decodable { let habitId: String }
+    private struct ActiveRow: Decodable {
+        let id: String
+        let title: String
+        let updatedAt: String      // ISO8601; used as the "started" mark
+        let focusDuration: Int
+    }
 
     private static let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -187,5 +216,15 @@ final class TitroutineClient: ObservableObject {
         f.timeZone = TimeZone.current
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: Date())
+    }
+
+    /// Parse a Postgres timestamptz (with or without fractional seconds).
+    private static func parseDate(_ s: String) -> Date? {
+        let withFrac = ISO8601DateFormatter()
+        withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFrac.date(from: s) { return d }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: s)
     }
 }
