@@ -67,21 +67,20 @@ struct FloatingPetView: View {
     var body: some View {
         VStack(spacing: 2) {
             if pet.showChat && model.petID != nil {
-                // Task list on top — the persistent reminder.
-                if !model.titroutineTasks.isEmpty {
-                    TaskBubble(tasks: model.titroutineTasks)
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
-                }
-                // Below it: agent rows (working) or idle chatter. Chatter is
-                // hidden while a task list is up so the two bubbles don't clutter.
-                if bubbleSettings.multiAgentBubbleEnabled && !model.sessions.isEmpty {
-                    AgentBubble(sessions: model.sessions)
+                // One bubble: agent rows + Titroutine task rows together (native
+                // multi-agent style). Falls back to the chat bubble for idle
+                // chatter, or a standalone task list when multi-agent is off.
+                if bubbleSettings.multiAgentBubbleEnabled && (!model.sessions.isEmpty || !model.titroutineTasks.isEmpty) {
+                    AgentBubble(sessions: model.sessions, tasks: model.titroutineTasks)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
                 } else if !model.chatLine.isEmpty && model.titroutineTasks.isEmpty {
                     ChatBubble(text: model.chatLine,
                                projectName: pet.splitPet ? model.projectName : nil)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
+                } else if !model.titroutineTasks.isEmpty {
+                    TaskBubble(tasks: model.titroutineTasks)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .transition(AnyTransition.scale(scale: 0.6).combined(with: .opacity))
                 }
@@ -159,6 +158,9 @@ private struct GroupedSession: Identifiable {
 /// `tailEdge` controls whether the pointer arrow points down (pet) or up (menu bar).
 struct AgentBubble: View {
     let sessions: [AgentSession]
+    /// Optional Titroutine reminder rows appended below the agent rows, in the
+    /// same bubble (empty = agents only).
+    var tasks: [String] = []
     var tailEdge: Edge = .bottom
     @ObservedObject private var settings = BubbleSettings.shared
 
@@ -222,7 +224,7 @@ struct AgentBubble: View {
     private var isPetChat: Bool { tailEdge == .bottom }
     // Capsule for single visible row; rounded rect when taller or carousel dots are shown.
     private var useCapsule: Bool {
-        isPetChat && groupedSessions.count <= 1 && settings.displayMode != .compact
+        isPetChat && groupedSessions.count <= 1 && tasks.isEmpty && settings.displayMode != .compact
     }
 
     var body: some View {
@@ -304,6 +306,29 @@ struct AgentBubble: View {
                 chatStyle: isPetChat,
                 textColor: textColor
             )
+        }
+        // Titroutine reminder rows, in the same bubble below the agent rows.
+        if !tasks.isEmpty {
+            if !groupedSessions.isEmpty {
+                Rectangle().fill(textColor(0.12))
+                    .frame(height: 1)
+                    .padding(.vertical, 1)
+            }
+            Text("🐰 Còn \(tasks.count) việc chưa xong nè!")
+                .font(.system(size: settings.fontSize.primaryPt, weight: .semibold))
+                .foregroundStyle(textColor(0.85))
+            ForEach(Array(tasks.prefix(5).enumerated()), id: \.offset) { _, t in
+                Text("• \(t)")
+                    .font(.system(size: settings.fontSize.secondaryPt, weight: .regular))
+                    .foregroundStyle(textColor(0.8))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            if tasks.count > 5 {
+                Text("… và \(tasks.count - 5) việc nữa")
+                    .font(.system(size: settings.fontSize.secondaryPt, weight: .regular))
+                    .foregroundStyle(textColor(0.5))
+            }
         }
     }
 
