@@ -522,9 +522,9 @@ final class PetController: ObservableObject {
             lineCount = spec.count
             resolvedLine = chatLine(forMood: spec.mood, sessions: groupSessions, petID: spec.petID)
         }
-        // Show the Titroutine list only on the home pet while it has no live
-        // agent rows; agents always take precedence in their window.
-        let showTasks = spec.key == PetWindowPlanner.defaultKey && groupSessions.isEmpty
+        // Show the Titroutine list on the home pet — alongside any live agent
+        // rows, so task reminders and agent monitoring run in parallel.
+        let showTasks = spec.key == PetWindowPlanner.defaultKey
         return PetWindowController.WindowState(
             petID: petID,
             mood: spec.mood,
