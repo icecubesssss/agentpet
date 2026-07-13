@@ -9,13 +9,23 @@ ROOT="$(pwd)"
 APP="$ROOT/build/AgentPet.app"
 CONFIG="${1:-release}"
 
-# Build a universal binary (Apple Silicon + Intel) so the app runs on both.
-# Apple Silicon machines still run the native arm64 slice, unchanged.
-ARCHS=(--arch arm64 --arch x86_64)
+# A universal binary (arm64 + x86_64) is built through XCBuild, which only ships
+# with the full Xcode. With just the Command Line Tools, `swift build --arch ...`
+# fails ("xcbuild ... does not exist"), so fall back to a native-arch build that
+# runs on this machine. Install full Xcode to produce a distributable universal
+# app. Force native via AGENTPET_NATIVE=1.
+DEV_DIR="$(xcode-select -p 2>/dev/null || true)"
+if [ -z "${AGENTPET_NATIVE:-}" ] && [[ "$DEV_DIR" == *.app/* ]]; then
+    ARCHS=(--arch arm64 --arch x86_64)
+    ARCH_DESC="universal arm64 + x86_64"
+else
+    ARCHS=()
+    ARCH_DESC="native $(uname -m) (no full Xcode — universal build needs it)"
+fi
 
-echo "Building ($CONFIG, universal arm64 + x86_64)..."
-swift build -c "$CONFIG" "${ARCHS[@]}"
-BINDIR="$(swift build -c "$CONFIG" "${ARCHS[@]}" --show-bin-path)"
+echo "Building ($CONFIG, $ARCH_DESC)..."
+swift build -c "$CONFIG" ${ARCHS[@]+"${ARCHS[@]}"}
+BINDIR="$(swift build -c "$CONFIG" ${ARCHS[@]+"${ARCHS[@]}"} --show-bin-path)"
 
 echo "Assembling $APP ..."
 rm -rf "$APP"
