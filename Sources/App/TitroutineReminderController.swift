@@ -58,7 +58,8 @@ final class TitroutineReminderController {
                 }
                 self.lastTotal = out.total
             } catch {
-                NSLog("[Titroutine] fetch error: \(error.localizedDescription)")
+                // Offline / transient failure — keep the last list until the next
+                // refresh (silent, matching the app's other pollers).
             }
         }
     }
