@@ -1,0 +1,9 @@
+/* Hide Instagram Reels entry points (nav tab + reel links). Gated by the toggle;
+ * /reels/ navigations are bounced in instagram.js. */
+html[data-agentpet-hide-reels] a[href="/reels/"],
+html[data-agentpet-hide-reels] a[href^="/reels/"],
+html[data-agentpet-hide-reels] a[href*="/reels/"],
+html[data-agentpet-hide-reels] [aria-label="Reels"],
+html[data-agentpet-hide-reels] svg[aria-label="Reels"] {
+  display: none !important;
+}

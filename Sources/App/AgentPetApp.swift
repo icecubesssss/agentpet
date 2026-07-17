@@ -37,12 +37,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CareSyncController.shared.start()
         BreakReminderController.shared.start()
         TitroutineReminderController.shared.start()
+        FocusBlockController.shared.start()
         SettingsModel.shared.migrateInstalledHooksIfNeeded()
         SettingsModel.shared.repairStaleHookPathsIfNeeded()
         updater = UpdaterController.shared
         StatusBarController.shared.start()
         DefaultPetBootstrap.installIfNeeded()
         SettingsWindowController.shared.showOnFirstLaunch()
+    }
+
+    /// Clear the focus block on quit so a closed app never leaves a browser
+    /// profile stuck blocking.
+    func applicationWillTerminate(_ notification: Notification) {
+        FocusBlockController.shared.shutdown()
     }
 
     /// Handles `agentpet://link?token=…&login=…` — the tail of the web's

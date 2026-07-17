@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentPet Focus Block</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        width: 320px;
+        margin: 0;
+        padding: 14px 14px 16px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        background: #fbf5ec;
+        color: #4a3b2b;
+        font-size: 13px;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background: #201a16; color: #efe3d2; }
+        .site, select, input, .addrow input { background: rgba(255,255,255,0.06) !important; color: inherit; border-color: rgba(255,255,255,0.12) !important; }
+        .status { background: rgba(255,255,255,0.06); }
+        .muted, .hint, .empty { color: #b6a48a; }
+      }
+      header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+      header .bun { font-size: 22px; }
+      header h1 { font-size: 15px; margin: 0; font-weight: 700; }
+      .status {
+        display: flex; align-items: center; gap: 7px;
+        padding: 9px 11px; border-radius: 12px; margin-bottom: 12px;
+        background: rgba(180,130,70,0.12);
+      }
+      .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+      .dot.on { background: #e0873b; }
+      .dot.off { background: #9bb19b; }
+      .dot.linked { background: #4caf7d; }
+      .dot.unlinked { background: #c98a3a; }
+      .status .txt { font-weight: 600; }
+      .muted { color: #8a7a66; font-size: 12px; }
+      label.blk { display: block; font-weight: 700; margin: 14px 0 6px; }
+      select {
+        width: 100%; padding: 7px 8px; border-radius: 10px;
+        border: 1px solid rgba(140,110,70,0.3); background: #fff; font-size: 13px;
+      }
+      .site {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 6px 9px; border-radius: 9px; background: #fff; margin-top: 5px;
+      }
+      .site .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .site .x { cursor: pointer; border: none; background: none; font-size: 15px; color: #b06a4a; padding: 0 2px; }
+      .addrow { display: flex; gap: 6px; margin-top: 6px; }
+      .addrow input {
+        flex: 1; padding: 7px 8px; border-radius: 9px;
+        border: 1px solid rgba(140,110,70,0.3); background: #fff; font-size: 13px;
+      }
+      .addrow button {
+        border: none; cursor: pointer; border-radius: 9px; padding: 0 13px;
+        font-weight: 700; color: #fff; background: #e0873b;
+      }
+      .empty { font-style: italic; color: #8a7a66; margin-top: 5px; }
+      .chk { display: flex; align-items: center; gap: 8px; margin-top: 7px; cursor: pointer; }
+      .chk input { width: 15px; height: 15px; accent-color: #e0873b; flex: none; }
+      .hint { margin-top: 12px; font-size: 11px; color: #8a7a66; line-height: 1.45; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="bun">🐰</span>
+      <h1>Focus Block</h1>
+    </header>
+
+    <div class="status">
+      <span class="dot" id="blockDot"></span>
+      <span class="txt" id="blockTxt">—</span>
+    </div>
+    <div class="status">
+      <span class="dot" id="linkDot"></span>
+      <span class="txt" id="linkTxt">—</span>
+    </div>
+
+    <label class="blk" for="override">In this Chrome profile</label>
+    <select id="override">
+      <option value="auto">Auto — follow AgentPet</option>
+      <option value="on">Always block</option>
+      <option value="off">Pause blocking</option>
+    </select>
+
+    <label class="blk">Blocked by AgentPet</label>
+    <div id="appSites"></div>
+
+    <label class="blk">Extra sites (this profile only)</label>
+    <div id="extraSites"></div>
+    <div class="addrow">
+      <input id="addInput" type="text" placeholder="e.g. reddit.com" />
+      <button id="addBtn" type="button">Add</button>
+    </div>
+
+    <div class="hint">
+      The main list is managed in the AgentPet app, so it stays in sync across all
+      your Chrome profiles. Extra sites above apply only here.
+    </div>
+
+    <label class="blk">Clean browsing (always on)</label>
+    <label class="chk"><input type="checkbox" id="cleanAds" /> Block ads &amp; trackers</label>
+    <label class="chk"><input type="checkbox" id="cleanPopups" /> Block pop-ups &amp; pop-unders</label>
+    <label class="chk"><input type="checkbox" id="cleanReels" /> Hide Reels &amp; Shorts (FB / IG / TikTok / YouTube)</label>
+    <label class="chk"><input type="checkbox" id="cleanAnnoyances" /> Hide cookie &amp; consent pop-ups</label>
+    <div class="hint">
+      These work all the time, task or not. Ad blocking is a curated list — solid,
+      but not as complete as a dedicated ad blocker.
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

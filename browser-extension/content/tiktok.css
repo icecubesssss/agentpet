@@ -1,0 +1,7 @@
+/* TikTok is short-form by default. The For-You feed is redirected in tiktok.js;
+ * this is a defensive hide of the main recommendation feed in case a surface
+ * slips past the redirect. Gated by the toggle. */
+html[data-agentpet-hide-reels] div[data-e2e="recommend-list-item-container"],
+html[data-agentpet-hide-reels] div[data-e2e="feed-video"] {
+  display: none !important;
+}

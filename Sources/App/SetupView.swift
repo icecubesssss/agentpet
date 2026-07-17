@@ -246,6 +246,7 @@ private struct GeneralTab: View {
     @ObservedObject private var appLang = AppLanguage.shared
     @ObservedObject private var breaks = BreakReminderSettings.shared
     @ObservedObject private var titro = TitroutineSettings.shared
+    @ObservedObject private var focus = FocusBlockSettings.shared
     // Local mirror of the system login-item state so the toggle re-renders
     // reliably (the SMAppService status isn't observable on its own).
     @State private var launchAtLogin = LoginItem.isEnabled
@@ -255,6 +256,8 @@ private struct GeneralTab: View {
     @State private var titroPassword = ""
     @State private var titroError: String?
     @State private var titroBusy = false
+    // Focus block "add site" field.
+    @State private var focusNewSite = ""
 
     var body: some View {
         Form {
@@ -349,6 +352,7 @@ private struct GeneralTab: View {
                             value: $titro.reminderIntervalMinutes, in: 1...240, step: 1)
                         .disabled(!titro.enabled)
                         .opacity(titro.enabled ? 1 : 0.5)
+                    TextField("Web App URL", text: $titro.webAppURL)
                     HStack {
                         Text("Connected as \(titro.connectedEmail ?? "")")
                             .font(.caption).foregroundStyle(.secondary)
@@ -360,6 +364,7 @@ private struct GeneralTab: View {
                         .font(.caption).foregroundStyle(.secondary)
                     TextField("Supabase URL (https://xxxx.supabase.co)", text: $titro.supabaseURL)
                     TextField("Anon (public) key", text: $titro.anonKey)
+                    TextField("Web App URL (http://localhost:3000)", text: $titro.webAppURL)
                     Divider()
                     TextField("Account email", text: $titroEmail)
                     SecureField("Password", text: $titroPassword)
@@ -371,6 +376,69 @@ private struct GeneralTab: View {
                         Button(titroBusy ? "Connecting…" : "Connect") { connectTitroutine() }
                             .disabled(titroBusy || !titro.isConfigured || titroEmail.isEmpty || titroPassword.isEmpty)
                     }
+                }
+            }
+
+            Section("Focus block") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Block distracting sites")
+                        Text("Pauses time-wasting sites in your browser while you focus. Enforced by a browser extension and synced to every Chrome profile — no admin password needed.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    ColorSwitch(isOn: $focus.enabled)
+                }
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Auto-block while focusing")
+                        Text("Turns blocking on automatically whenever a Titroutine task is in progress.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    ColorSwitch(isOn: $focus.autoDuringFocus)
+                }
+                .disabled(!focus.enabled)
+                .opacity(focus.enabled ? 1 : 0.5)
+
+                if !focus.autoDuringFocus {
+                    HStack {
+                        Text("Block now")
+                        Spacer()
+                        ColorSwitch(isOn: $focus.manualBlocking)
+                    }
+                    .disabled(!focus.enabled)
+                    .opacity(focus.enabled ? 1 : 0.5)
+                }
+
+                ForEach(focus.blockedSites, id: \.self) { site in
+                    HStack {
+                        Text(site)
+                        Spacer()
+                        Button {
+                            focus.removeSite(site)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                HStack {
+                    TextField("Add a site (e.g. youtube.com)", text: $focusNewSite)
+                        .onSubmit { addFocusSite() }
+                    Button("Add") { addFocusSite() }
+                        .disabled(focusNewSite.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("One-time setup: install the extension")
+                        Text("Installs the app↔browser bridge and opens the extension folder. Then load it unpacked at chrome://extensions (once per profile you want protected).")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Set up") { FocusBlockController.shared.setupBridgeAndRevealExtension() }
                 }
             }
 
@@ -470,6 +538,11 @@ private struct GeneralTab: View {
             }
             titroBusy = false
         }
+    }
+
+    private func addFocusSite() {
+        focus.addSite(focusNewSite)
+        focusNewSite = ""
     }
 
     private var notificationTitle: String {

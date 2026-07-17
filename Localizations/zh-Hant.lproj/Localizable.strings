@@ -505,3 +505,15 @@
 "The home pet nudges you to rest after a work stretch." = "主寵物會在你工作一段時間後提醒休息。";
 "Turn off to freeze pet/bubble animation (lower CPU)." = "關閉以凍結寵物/氣泡動畫（降低 CPU）。";
 "missing" = "缺失";
+
+/* Focus block */
+"Focus block" = "專注封鎖";
+"Block distracting sites" = "封鎖分心網站";
+"Pauses time-wasting sites in your browser while you focus. Enforced by a browser extension and synced to every Chrome profile — no admin password needed." = "在你專注時暫停瀏覽器裡浪費時間的網站。由瀏覽器擴充功能執行，並同步到每個 Chrome 設定檔——無需管理員密碼。";
+"Auto-block while focusing" = "專注時自動封鎖";
+"Turns blocking on automatically whenever a Titroutine task is in progress." = "只要有 Titroutine 任務正在進行，就自動開啟封鎖。";
+"Block now" = "立即封鎖";
+"Add a site (e.g. youtube.com)" = "新增網站（例如 youtube.com）";
+"One-time setup: install the extension" = "一次性設定：安裝擴充功能";
+"Installs the app↔browser bridge and opens the extension folder. Then load it unpacked at chrome://extensions (once per profile you want protected)." = "安裝應用↔瀏覽器橋接並開啟擴充功能資料夾。然後在 chrome://extensions 載入未封裝的擴充功能（每個要保護的設定檔各一次）。";
+"Set up" = "設定";

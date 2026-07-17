@@ -1,0 +1,13 @@
+/* Hide Facebook Reels entry points. FB obfuscates classes, so we target stable
+ * hrefs + aria-labels (incl. Vietnamese "Thước phim"). Gated by the hide-reels
+ * attribute so the toggle turns it off. URL navigations are bounced in facebook.js. */
+html[data-agentpet-hide-reels] a[href^="/reel/"],
+html[data-agentpet-hide-reels] a[href^="https://www.facebook.com/reel/"],
+html[data-agentpet-hide-reels] a[href*="/reels/"],
+html[data-agentpet-hide-reels] a[href*="/watch/reels"],
+html[data-agentpet-hide-reels] [aria-label="Reels" i],
+html[data-agentpet-hide-reels] [aria-label="Reels and short videos" i],
+html[data-agentpet-hide-reels] [aria-label="Thước phim" i],
+html[data-agentpet-hide-reels] [aria-label="Reels và video ngắn" i] {
+  display: none !important;
+}

@@ -1,0 +1,84 @@
+{
+  "manifest_version": 3,
+  "name": "AgentPet Focus Block",
+  "version": "1.2.0",
+  "description": "Blocks distracting sites while you focus (driven by the AgentPet app across all Chrome profiles), plus always-on cleaning: ad/tracker blocking (3500+ domains), pop-up & cookie-banner guard, and hiding Reels/Shorts.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsQwvKAxg/N2roPs1U3BT4pqlg+vffDflXf3mvXe2F8xNFCgmgs3Ssc300KgNhefimf0gq+HnQNpoc+4JKxD8nHyGMnWQm2XPA96jO06myH/nLnkn/O/t7dvobz2qpIRorUdi8m2tfQy4E9xjzPGuuDXARYzNfZlThAgZV2t7vCU7xdKETmncQEymk4Hb5fisRfsScZGHAW3G32vVlSS/ZHeX5/j2Jrt7NMwUYF7oLdZll8GbYWwNP2p3B8HrOBLTJlSB1BqngPVqLNPddzaELwWc7YJMlf9/dJcaerRdTissGuCChoSJRr2FqWYtzFfNTb8zcFYKfv7ewZREixYFOwIDAQAB",
+  "permissions": ["declarativeNetRequest", "nativeMessaging", "storage", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AgentPet Focus Block",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      { "id": "ads", "enabled": true, "path": "rules/ads.json" }
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/gate.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/popup-guard.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "css": ["content/annoyances.css"],
+      "js": ["content/annoyances.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://*.facebook.com/*"],
+      "css": ["content/facebook.css"],
+      "js": ["content/facebook.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://*.instagram.com/*"],
+      "css": ["content/instagram.css"],
+      "js": ["content/instagram.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://*.tiktok.com/*"],
+      "css": ["content/tiktok.css"],
+      "js": ["content/tiktok.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "css": ["content/youtube.css"],
+      "js": ["content/youtube.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["blocked.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

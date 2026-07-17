@@ -1,0 +1,12 @@
+/* Hide YouTube Shorts (shelves in the feed + the left-nav entries). YouTube uses
+ * stable custom element names, so this is fairly robust. Gated by the toggle;
+ * /shorts/ URLs are converted to the normal player in youtube.js. */
+html[data-agentpet-hide-reels] ytd-reel-shelf-renderer,
+html[data-agentpet-hide-reels] ytd-rich-shelf-renderer[is-shorts],
+html[data-agentpet-hide-reels] ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
+html[data-agentpet-hide-reels] ytd-guide-entry-renderer:has(a[title="Shorts"]),
+html[data-agentpet-hide-reels] ytd-mini-guide-entry-renderer[aria-label="Shorts"],
+html[data-agentpet-hide-reels] a[title="Shorts"],
+html[data-agentpet-hide-reels] ytd-reel-item-renderer {
+  display: none !important;
+}

@@ -51,6 +51,23 @@ struct MenuContentView: View {
                 Text(subtitle).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
             }
             Spacer()
+            Button(action: {
+                dismiss()
+                if let url = URL(string: TitroutineSettings.shared.webAppURL) {
+                    NSWorkspace.shared.open(url)
+                }
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "safari")
+                    Text("Web App")
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
     }
@@ -72,7 +89,6 @@ struct MenuContentView: View {
     private static let stageColors: [Color] = [.green, .teal, .blue, .purple, .orange]
 
     private var careSection: some View {
-        let state = care.current
         let level = care.level
         let idx = min(care.stageIndex, Self.stageColors.count - 1)
         let color = Self.stageColors[idx]

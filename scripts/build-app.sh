@@ -49,6 +49,15 @@ if [ -d "$ROOT/Localizations" ]; then
     done
 fi
 
+# Bundle the Focus Block browser extension so the app can reveal it for
+# "Load unpacked" (Settings → Focus block). Skip the private signing key.
+if [ -d "$ROOT/browser-extension" ]; then
+    rm -rf "$APP/Contents/Resources/browser-extension"
+    mkdir -p "$APP/Contents/Resources/browser-extension"
+    rsync -a --exclude '.keys' --exclude '.gitignore' \
+        "$ROOT/browser-extension/" "$APP/Contents/Resources/browser-extension/"
+fi
+
 # The agentpet target now ships a resource (the donate QR), so SwiftPM emits
 # AgentPet_agentpet.bundle. Copy it so Bundle.module resolves inside the .app.
 if [ -d "$BINDIR/AgentPet_agentpet.bundle" ]; then

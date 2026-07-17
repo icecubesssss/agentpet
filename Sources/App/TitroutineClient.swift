@@ -135,7 +135,7 @@ final class TitroutineClient: ObservableObject {
     func fetchOutstanding() async throws -> Outstanding {
         let habits: [Row] = try await restGET(
             table: "habits",
-            query: [.init(name: "select", value: "id,title"),
+            query: [.init(name: "select", value: "id,title,frequency"),
                     .init(name: "archived_at", value: "is.null"),
                     .init(name: "type", value: "neq.negative")])
         let doneLogs: [LogRow] = try await restGET(
@@ -153,6 +153,7 @@ final class TitroutineClient: ObservableObject {
                     .init(name: "status", value: "eq.todo")])
 
         let doneIDs = Set(doneLogs.map(\.habitId))
+        let jsWeekday = Calendar.current.component(.weekday, from: Date()) - 1
         var rows: [TitroutineRow] = []
         // In-progress tasks first — the "running" rows with a live timer.
         rows += active.map {
@@ -160,7 +161,20 @@ final class TitroutineClient: ObservableObject {
                           startedAt: Self.parseDate($0.updatedAt),
                           targetMinutes: $0.focusDuration)
         }
-        rows += habits.filter { !doneIDs.contains($0.id) }.map { TitroutineRow(icon: "🔁", title: $0.title) }
+        
+        let filteredHabits = habits.filter { habit in
+            if doneIDs.contains(habit.id) {
+                return false
+            }
+            if let freq = habit.frequency {
+                if freq.type == "specific_days", let days = freq.days {
+                    return days.contains(jsWeekday)
+                }
+            }
+            return true
+        }
+        
+        rows += filteredHabits.map { TitroutineRow(icon: "🔁", title: $0.title) }
         rows += todos.map { TitroutineRow(icon: "📋", title: $0.title) }
         return Outstanding(rows: rows)
     }
@@ -195,7 +209,15 @@ final class TitroutineClient: ObservableObject {
         let refreshToken: String
         let expiresIn: Int
     }
-    private struct Row: Decodable { let id: String; let title: String }
+    private struct HabitFrequency: Decodable {
+        let type: String
+        let days: [Int]?
+    }
+    private struct Row: Decodable {
+        let id: String
+        let title: String
+        let frequency: HabitFrequency?
+    }
     private struct LogRow: Decodable { let habitId: String }
     private struct ActiveRow: Decodable {
         let id: String

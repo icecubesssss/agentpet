@@ -506,3 +506,15 @@
 "The home pet nudges you to rest after a work stretch." = "Pet chính sẽ nhắc bạn nghỉ sau một quãng làm việc.";
 "Turn off to freeze pet/bubble animation (lower CPU)." = "Tắt để dừng hoạt ảnh pet/bong bóng (giảm CPU).";
 "missing" = "thiếu";
+
+/* Focus block */
+"Focus block" = "Chặn xao nhãng";
+"Block distracting sites" = "Chặn web gây xao nhãng";
+"Pauses time-wasting sites in your browser while you focus. Enforced by a browser extension and synced to every Chrome profile — no admin password needed." = "Tạm chặn các web tốn thời gian trên trình duyệt khi bạn tập trung. Thực thi bằng tiện ích trình duyệt và đồng bộ trên mọi profile Chrome — không cần mật khẩu admin.";
+"Auto-block while focusing" = "Tự chặn khi đang tập trung";
+"Turns blocking on automatically whenever a Titroutine task is in progress." = "Tự bật chặn mỗi khi có một task Titroutine đang làm.";
+"Block now" = "Chặn ngay";
+"Add a site (e.g. youtube.com)" = "Thêm một trang (vd: youtube.com)";
+"One-time setup: install the extension" = "Cài đặt một lần: cài tiện ích";
+"Installs the app↔browser bridge and opens the extension folder. Then load it unpacked at chrome://extensions (once per profile you want protected)." = "Cài cầu nối app↔trình duyệt và mở thư mục tiện ích. Sau đó Load unpacked tại chrome://extensions (một lần cho mỗi profile bạn muốn bảo vệ).";
+"Set up" = "Cài đặt";

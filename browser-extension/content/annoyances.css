@@ -1,0 +1,40 @@
+/* Hide cookie-consent / GDPR / newsletter overlays from the major Consent
+ * Management Platforms. These use stable ids/classes, so targeting them by CMP is
+ * low false-positive. Gated by the clean-annoyances attribute; annoyances.js also
+ * removes them and restores page scrolling. */
+html[data-agentpet-clean-annoyances] :is(
+  /* OneTrust */
+  #onetrust-banner-sdk, #onetrust-consent-sdk, #onetrust-pc-sdk, .onetrust-pc-dark-filter,
+  /* Cookiebot */
+  #CybotCookiebotDialog, #CybotCookiebotDialogBodyUnderlay,
+  /* Osano */
+  .osano-cm-window, .osano-cm-dialog,
+  /* Quantcast */
+  #qc-cmp2-container, .qc-cmp2-container, #qc-cmp2-ui,
+  /* TrustArc */
+  #truste-consent-track, .truste_overlay, .truste_box_overlay, .trustarc-banner-container,
+  /* Didomi */
+  #didomi-host, .didomi-consent-popup, .didomi-notice-banner,
+  /* Usercentrics */
+  #usercentrics-root, #usercentrics-cmp-ui, [data-testid="uc-app-container"],
+  /* CookieYes */
+  .cky-consent-container, .cky-overlay, .cky-modal,
+  /* Complianz */
+  #cmplz-cookiebanner-container, .cmplz-cookiebanner,
+  /* Borlabs */
+  #BorlabsCookieBox, ._brlbs-bar-wrap,
+  /* Google Funding Choices / AdSense consent */
+  .fc-consent-root, .fc-dialog-overlay, .fc-dialog-container,
+  /* Termly */
+  #termly-code-snippet-support,
+  /* Iubenda */
+  #iubenda-cs-banner, .iubenda-cs-overlay,
+  /* Sourcepoint */
+  .sp_message_container, [id^="sp_message_container"],
+  /* WordPress cookie plugins */
+  #cookie-notice, #cookie-law-info-bar, #cliSettingsPopup,
+  /* Cookie Consent (insites) + Klaro */
+  .cc-window.cc-banner, .cc-window.cc-floating, .klaro .cookie-modal, .klaro .cookie-notice
+) {
+  display: none !important;
+}

@@ -34,6 +34,9 @@ final class TitroutineSettings: ObservableObject {
     @Published var anonKey: String {
         didSet { UserDefaults.standard.set(anonKey, forKey: Self.anonKey_) }
     }
+    @Published var webAppURL: String {
+        didSet { UserDefaults.standard.set(webAppURL, forKey: Self.webAppURLKey) }
+    }
 
     /// Invoked on any change so `TitroutineReminderController` can react.
     var onChange: (() -> Void)?
@@ -54,6 +57,7 @@ final class TitroutineSettings: ObservableObject {
     private static let emailKey = "agentpet.titroutine.connectedEmail"
     private static let urlKey = "agentpet.titroutine.supabaseURL"
     private static let anonKey_ = "agentpet.titroutine.anonKey"
+    private static let webAppURLKey = "agentpet.titroutine.webAppURL"
 
     init() {
         let d = UserDefaults.standard
@@ -62,5 +66,13 @@ final class TitroutineSettings: ObservableObject {
         connectedEmail = d.string(forKey: Self.emailKey)
         supabaseURL = d.string(forKey: Self.urlKey) ?? ""
         anonKey = d.string(forKey: Self.anonKey_) ?? ""
+        
+        let storedURL = d.string(forKey: Self.webAppURLKey)
+        if storedURL == nil || storedURL == "http://localhost:3000" {
+            webAppURL = "https://titroutines.vercel.app/"
+            d.set("https://titroutines.vercel.app/", forKey: Self.webAppURLKey)
+        } else {
+            webAppURL = storedURL!
+        }
     }
 }

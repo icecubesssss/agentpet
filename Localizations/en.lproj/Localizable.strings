@@ -447,3 +447,15 @@
 "Updates" = "Updates";
 "Quit" = "Quit";
 "Checking…" = "Checking…";
+
+/* Focus block */
+"Focus block" = "Focus block";
+"Block distracting sites" = "Block distracting sites";
+"Pauses time-wasting sites in your browser while you focus. Enforced by a browser extension and synced to every Chrome profile — no admin password needed." = "Pauses time-wasting sites in your browser while you focus. Enforced by a browser extension and synced to every Chrome profile — no admin password needed.";
+"Auto-block while focusing" = "Auto-block while focusing";
+"Turns blocking on automatically whenever a Titroutine task is in progress." = "Turns blocking on automatically whenever a Titroutine task is in progress.";
+"Block now" = "Block now";
+"Add a site (e.g. youtube.com)" = "Add a site (e.g. youtube.com)";
+"One-time setup: install the extension" = "One-time setup: install the extension";
+"Installs the app↔browser bridge and opens the extension folder. Then load it unpacked at chrome://extensions (once per profile you want protected)." = "Installs the app↔browser bridge and opens the extension folder. Then load it unpacked at chrome://extensions (once per profile you want protected).";
+"Set up" = "Set up";

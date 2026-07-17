@@ -72,6 +72,12 @@ struct PetStatsView: View {
                     PetWindowController.shared.closeStatsPopover()
                     SettingsWindowController.shared.show()
                 }
+                footButton(icon: "safari", label: "Web App") {
+                    PetWindowController.shared.closeStatsPopover()
+                    if let url = URL(string: TitroutineSettings.shared.webAppURL) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
                 footButton(icon: "arrow.triangle.2.circlepath",
                            label: updateLabel ?? NSLocalizedString("Updates", comment: ""),
                            badge: updater.updatePending) {

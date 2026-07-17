@@ -12,6 +12,8 @@ struct AgentPetMain {
             HookCLI.run(arguments: Array(args.dropFirst()))
         case "run":
             RunCLI.run(arguments: Array(args.dropFirst()))
+        case "focus-host":
+            FocusHostCLI.run(arguments: Array(args.dropFirst()))
         default:
             AgentPetApp.main()
         }
