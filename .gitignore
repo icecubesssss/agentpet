@@ -27,3 +27,6 @@ landing/node_modules/
 # Claude Code local tooling
 .claude/
 .build-stale-onedrive/
+
+# Local agent memory , never commit
+/CLAUDE.md

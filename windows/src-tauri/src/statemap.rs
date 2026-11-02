@@ -89,6 +89,23 @@ pub fn state(kind: &str, event: &str) -> Option<&'static str> {
             "stop" | "Stop" => Some("done"),
             _ => None,
         },
+        // xAI Grok Build sends snake_case event VALUES in its payload.
+        "grok" => match event {
+            "session_start" => Some("registered"),
+            "user_prompt_submit" | "pre_tool_use" | "post_tool_use" => Some("working"),
+            "notification" => Some("waiting"),
+            "stop" => Some("done"),
+            _ => None,
+        },
+        // jcode observer hooks (port of the macOS StateMapper). post_tool doubles
+        // as a heartbeat so a long turn isn't pruned as stale. A turn ending on a
+        // question arrives pre-normalised as "waiting" (handled at the top).
+        "jcode" => match event {
+            "session_start" => Some("registered"),
+            "turn_start" | "post_tool" => Some("working"),
+            "turn_end" => Some("done"),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -98,5 +115,6 @@ pub fn is_session_end(kind: &str, event: &str) -> bool {
     matches!(
         (kind, event),
         ("claude", "SessionEnd") | ("gemini", "SessionEnd") | ("cursor", "sessionEnd") | ("droid", "SessionEnd")
+            | ("grok", "session_end") | ("jcode", "session_end")
     )
 }

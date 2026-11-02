@@ -4,10 +4,20 @@
 // laid out from the user's token order with the same animated message text
 // (erase → retype → ellipsis-cycle/shimmer), state dots, and brand icons.
 
-import { Session, basename, agentLabel } from "./state";
+import { invoke } from "@tauri-apps/api/core";
+import { Session, agentLabel } from "./state";
 import { agentIconUrl, uiIcon } from "./icons";
 import { stateMessage, bubbleLine } from "./activity";
 import { t } from "./i18n";
+import { projectLabel } from "./projectnames";
+
+/// Stable hue from a custom agent's name so its lettered badge always gets the
+/// same color (issue #56, parity with the macOS CustomAgentIcon).
+function customAgentColor(name: string): string {
+  let hash = 5381;
+  for (const ch of name.toLowerCase()) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return `hsl(${hash % 360} 55% 50%)`;
+}
 
 export type BubbleToken =
   | "dot" | "icon" | "title" | "project" | "separator" | "message" | "stateLabel" | "elapsed";
@@ -544,6 +554,15 @@ export class BubbleRenderer {
     el.dataset.state = s.state;
     el.classList.toggle("waiting", s.state === "waiting");
 
+    // Click a row to focus the terminal running it (Warp deep-link; see the
+    // focus_terminal Rust command). Only Warp gives a reliable focus on
+    // Windows/Linux, so only warp-backed rows advertise as clickable.
+    const canFocus = !!s.terminalFocusUrl;
+    el.classList.toggle("focusable", canFocus);
+    el.onclick = canFocus
+      ? () => { void invoke("focus_terminal", { program: s.terminalProgram, focusUrl: s.terminalFocusUrl }); }
+      : null;
+
     const dot = el.querySelector<HTMLElement>(".sdot");
     if (dot) dot.classList.toggle("spin", s.state !== "idle");
 
@@ -554,6 +573,7 @@ export class BubbleRenderer {
       if (slot.dataset.choice !== choice) {
         slot.dataset.choice = choice;
         slot.title = agentLabel(s.agent);
+        slot.style.background = ""; // clear any stale lettered-badge fill
         if (choice.startsWith("sym:")) {
           slot.innerHTML = uiIcon(choice.slice(4));
           slot.className = "icon-slot sym";
@@ -562,8 +582,16 @@ export class BubbleRenderer {
           slot.className = "icon-slot emoji";
         } else {
           const url = agentIconUrl(choice.slice(6));
-          slot.className = "icon-slot";
-          slot.innerHTML = url ? `<img class="aicon" src="${url}" alt="">` : "";
+          if (url) {
+            slot.className = "icon-slot";
+            slot.innerHTML = `<img class="aicon" src="${url}" alt="">`;
+          } else {
+            // Custom agent with no brand logo: a deterministic lettered badge so
+            // distinct customs still look distinct (issue #56, parity with macOS).
+            slot.className = "icon-slot letter";
+            slot.textContent = s.agent.slice(0, 1).toUpperCase();
+            slot.style.background = customAgentColor(s.agent);
+          }
         }
       }
     }
@@ -575,7 +603,7 @@ export class BubbleRenderer {
     }
 
     const project = el.querySelector<HTMLElement>(".rproject");
-    if (project) project.textContent = s.project ? basename(s.project) : s.session;
+    if (project) project.textContent = s.project ? projectLabel(s.project) : s.session;
 
     row.anim.set(messageFor(s), s.state !== "done");
 
@@ -593,5 +621,36 @@ export class BubbleRenderer {
       badge.style.display = g.count > 1 ? "" : "none";
       badge.textContent = `×${g.count}`;
     }
+
+    this.syncApproval(el, s);
+  }
+
+  /// Show Allow/Deny buttons on a row whose session is awaiting a gated tool
+  /// decision (the approval gate). Buttons stop propagation so they don't also
+  /// trigger the row's focus-terminal click.
+  private syncApproval(el: HTMLElement, s: Session) {
+    const ap = s.pendingApproval;
+    let box = el.querySelector<HTMLElement>(".approval");
+    if (!ap) { box?.remove(); return; }
+    if (!box) {
+      box = document.createElement("span");
+      box.className = "approval";
+      el.appendChild(box);
+    }
+    if (box.dataset.id === ap.id) return; // already built for this request
+    box.dataset.id = ap.id;
+    box.innerHTML = "";
+    const btn = (label: string, cls: string, decision: string) => {
+      const b = document.createElement("button");
+      b.className = cls;
+      b.textContent = label;
+      b.onclick = (ev) => {
+        ev.stopPropagation();
+        void invoke("resolve_approval", { id: ap.id, decision });
+      };
+      return b;
+    };
+    box.appendChild(btn(t("Allow"), "ap-allow", "allow"));
+    box.appendChild(btn(t("Deny"), "ap-deny", "deny"));
   }
 }

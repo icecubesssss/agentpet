@@ -86,8 +86,18 @@ public final class SessionStore {
             byID.removeValue(forKey: event.sessionId)
             return nil
         }
-        guard let state = StateMapper.state(for: event.agentKind, eventName: event.eventName) else {
+        guard var state = StateMapper.state(for: event.agentKind, eventName: event.eventName) else {
             return nil
+        }
+
+        let pendingApproval: PendingApproval?
+        if let requestId = event.approvalRequestId {
+            state = .waiting
+            pendingApproval = PendingApproval(
+                requestId: requestId, toolName: event.toolName ?? "", summary: event.toolSummary ?? ""
+            )
+        } else {
+            pendingApproval = nil
         }
 
         if var existing = byID[event.sessionId] {
@@ -96,7 +106,12 @@ public final class SessionStore {
             existing.updatedAt = now
             if let project = event.project { existing.project = project }
             if let model = event.model { existing.model = model }
+            if let program = event.terminalProgram { existing.terminalProgram = program }
+            if let tty = event.terminalTTY { existing.terminalTTY = tty }
+            if let focusURL = event.terminalFocusURL { existing.terminalFocusURL = focusURL }
+            if let name = event.agentName { existing.agentName = name }
             existing.message = event.message
+            existing.pendingApproval = pendingApproval
             byID[event.sessionId] = existing
             return existing
         }
@@ -108,10 +123,26 @@ public final class SessionStore {
             message: event.message,
             model: event.model,
             source: .hook,
-            updatedAt: now
+            updatedAt: now,
+            pendingApproval: pendingApproval,
+            terminalProgram: event.terminalProgram,
+            terminalTTY: event.terminalTTY,
+            terminalFocusURL: event.terminalFocusURL,
+            agentName: event.agentName
         )
         byID[event.sessionId] = session
         return session
+    }
+
+    /// Clears the pending approval for `id` and moves it to `.working`, but
+    /// only if `requestId` matches; otherwise a no-op returning `false`.
+    @discardableResult
+    public func resolveApproval(id: String, requestId: String) -> Bool {
+        guard var session = byID[id], session.pendingApproval?.requestId == requestId else { return false }
+        session.pendingApproval = nil
+        session.state = .working
+        byID[id] = session
+        return true
     }
 
     /// Demotes stale `done` sessions to `idle`, removes long-idle ones, and

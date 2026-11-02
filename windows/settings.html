@@ -6,6 +6,27 @@
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body class="settings">
+    <!-- First-run welcome (shown when opened with ?onboarding=1). -->
+    <div id="onboarding" hidden>
+      <div class="ob-card">
+        <div class="ob-head">
+          <div class="ob-logo">🐾</div>
+          <div>
+            <div class="ob-title" id="t-ob-title">Welcome to AgentPet</div>
+            <div class="ob-sub" id="t-ob-sub">A desktop pet for your AI coding agents. A few steps to get going.</div>
+          </div>
+        </div>
+        <div class="ob-steps">
+          <div class="ob-step"><span class="ob-n">1</span><div><div class="ob-st" id="t-ob-s1t">Pick your pet</div><div class="ob-sd" id="t-ob-s1d">Choose a starter pet or import your own.</div></div></div>
+          <div class="ob-step"><span class="ob-n">2</span><div><div class="ob-st" id="t-ob-s2t">Connect your agent</div><div class="ob-sd" id="t-ob-s2d">Set up Claude, Codex, Cursor and more below.</div></div></div>
+          <div class="ob-step"><span class="ob-n">3</span><div><div class="ob-st" id="t-ob-s3t">Turn on notifications</div><div class="ob-sd" id="t-ob-s3d">Get alerts when an agent finishes or needs input.</div></div></div>
+        </div>
+        <div class="ob-actions">
+          <button class="ghost-btn pill" id="ob-pet"><span id="t-ob-pet">Choose a pet</span></button>
+          <button class="prim-btn" id="ob-go"><span id="t-ob-go">Get started</span></button>
+        </div>
+      </div>
+    </div>
     <div class="shell">
     <div class="main-col">
     <!-- macOS preferences-style tab bar -->
@@ -172,7 +193,8 @@
           <div class="gcard care-hud">
             <div class="care-top">
               <div class="care-id">
-                <div class="care-name" id="care-name">—</div>
+                <div class="care-name" id="care-name" title="Click to rename">—</div>
+                <input class="care-rename" id="care-rename" maxlength="40" style="display:none" />
                 <div class="care-stage"><b id="care-level">Lv 0</b> · <span id="care-stagename">Hatchling</span></div>
               </div>
               <div class="care-hunger" id="care-hunger">—</div>
@@ -187,10 +209,19 @@
               <div class="care-stat"><div class="cs-label" id="t-care-lifetime">Lifetime</div><div class="cs-val" id="care-lifetime">0</div><div class="cs-sub" id="t-care-lifetime-sub">tokens eaten</div></div>
               <div class="care-stat"><div class="cs-label" id="t-care-sessions">Sessions</div><div class="cs-val" id="care-sessions">0</div><div class="cs-sub" id="t-care-sessions-sub">completed</div></div>
             </div>
+            <div class="care-charthead"><span id="t-care-cost">Est. cost (Claude)</span><span id="care-cost" class="dim"></span></div>
             <div class="care-charthead"><span id="t-care-burn">Burn, last 7 days</span><span id="care-burntotal" class="dim"></span></div>
             <div class="care-chart" id="care-chart"></div>
           </div>
           <div class="ghelp" id="t-care-help">Your pet eats the real tokens your agents burn and the sessions they finish. Feeding earns XP; it levels up through five stages.</div>
+        </div>
+        <div class="group">
+          <div class="ghead" id="t-limits-head">Subscription limits</div>
+          <div class="gcard pad">
+            <div class="row"><span class="dim" id="limits-sub"></span></div>
+            <div id="limits-list"></div>
+          </div>
+          <div class="ghelp" id="t-limits-help">Hidden providers stay out of Limits and don't make your pet anxious. Hiding every provider stops the sign-in read and the usage request.</div>
         </div>
         <div class="group">
           <div class="ghead" id="t-webprofile">Web profile</div>
@@ -245,6 +276,21 @@
             <label class="row"><span class="rt"><span id="t-idle">Show idle message</span>
               <span class="cap" id="t-idle-sub">The pet's chatter while no agent is running.</span></span>
               <input type="checkbox" id="idle" /></label>
+            <label class="row"><span class="rt"><span id="t-reactive">Reactive comments</span>
+              <span class="cap" id="t-reactive-sub">The pet reacts to token usage, streaks, hunger, and busy sessions.</span></span>
+              <input type="checkbox" id="reactive" /></label>
+            <label class="row"><span class="rt"><span id="t-split">Split pets by project</span>
+              <span class="cap" id="t-split-sub">Give a project its own pet window; the rest stay on the main pet.</span></span>
+              <input type="checkbox" id="split" /></label>
+            <div id="split-list" style="display:none"></div>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="ghead" id="t-projnames">Project names</div>
+          <div class="gcard">
+            <div class="row col"><span class="cap" id="t-projnames-sub">Show a friendlier name instead of the folder name in the bubble and notifications. Leave empty to use the folder name.</span></div>
+            <div id="projnames-list"></div>
           </div>
         </div>
 

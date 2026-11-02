@@ -14,6 +14,28 @@ use std::net::TcpStream;
 
 pub fn run_hook(args: &[String]) {
     let agent = flag(args, "--agent").unwrap_or_else(|| "unknown".into());
+    let (terminal_program, terminal_focus_url) = terminal_env();
+
+    // jcode describes the event in JCODE_HOOK_* env vars, not on stdin (stdin
+    // is /dev/null). From WSL these arrive through WSLENV (see jcode.rs).
+    if agent == "jcode" {
+        let Some((event, session, project, tool, message)) =
+            crate::jcode::event_from_env(|k| std::env::var(k).ok())
+        else {
+            std::process::exit(0);
+        };
+        post_and_exit(Payload {
+            agent,
+            event,
+            session,
+            project,
+            message,
+            tool,
+            terminal_program,
+            terminal_focus_url,
+            ..Payload::default()
+        });
+    }
 
     // Explicit flags win (opencode plugin + the run wrapper). `--event` carries a
     // normalised state directly there.
@@ -24,6 +46,8 @@ pub fn run_hook(args: &[String]) {
             session: flag(args, "--session").unwrap_or_default(),
             project: flag(args, "--project").unwrap_or_default(),
             message: flag(args, "--message").unwrap_or_default(),
+            terminal_program,
+            terminal_focus_url,
             ..Payload::default()
         });
     }
@@ -73,7 +97,7 @@ pub fn run_hook(args: &[String]) {
     if session.as_deref().unwrap_or("").is_empty() && event.as_deref().unwrap_or("").is_empty() {
         std::process::exit(0); // nothing useful; never block the agent
     }
-    post_and_exit(Payload {
+    let payload = Payload {
         agent,
         event: event.unwrap_or_default(),
         session: session.unwrap_or_default(),
@@ -94,7 +118,59 @@ pub fn run_hook(args: &[String]) {
             .to_string(),
         transcript: first_str(&v, &["transcript_path", "transcriptPath"]).unwrap_or_default(),
         subagent: first_str(&v, &["agent_id", "subagent_id", "agentId"]).unwrap_or_default(),
-    });
+        terminal_program,
+        terminal_focus_url,
+    };
+
+    // Approval gate (opt-in): a Claude PreToolUse for a whitelisted tool blocks on
+    // the user's Allow/Deny in the bubble, then prints Claude Code's
+    // permissionDecision JSON. Any failure (no app, timeout) falls back to "ask" ,
+    // the normal interactive prompt , so the gate never silently allows or denies.
+    if payload.agent == "claude"
+        && payload.event == "PreToolUse"
+        && crate::server::gated_tools().contains(&payload.tool)
+    {
+        let decision = post_await(&payload.to_json()).unwrap_or_else(|| "ask".to_string());
+        println!("{}", permission_json(&decision));
+        std::process::exit(0);
+    }
+
+    post_and_exit(payload);
+}
+
+fn permission_json(decision: &str) -> String {
+    let d = if decision == "allow" || decision == "deny" { decision } else { "ask" };
+    serde_json::json!({
+        "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": d }
+    })
+    .to_string()
+}
+
+/// POSTs the gated event and blocks (up to 12 s , longer than the daemon's 10 s
+/// so the reply always lands) for the decision in the response body.
+fn post_await(body: &str) -> Option<String> {
+    use std::time::Duration;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], crate::server::HOOK_PORT));
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(500)).ok()?;
+    stream.set_write_timeout(Some(Duration::from_millis(500))).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(12))).ok()?;
+    let req = format!(
+        "POST /event HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp).ok()?;
+    resp.split("\r\n\r\n").nth(1).map(|s| s.trim().to_string())
+}
+
+/// Which terminal the hook runs in, for click-to-focus. `TERM_PROGRAM` names it;
+/// Warp also exports `WARP_FOCUS_URL` (a `warp://session/<uuid>` deep link) that
+/// focuses the exact pane , the one cross-platform "focus exact tab" we get.
+fn terminal_env() -> (String, String) {
+    let nonempty = |k: &str| std::env::var(k).ok().filter(|s| !s.is_empty()).unwrap_or_default();
+    (nonempty("TERM_PROGRAM"), nonempty("WARP_FOCUS_URL"))
 }
 
 /// `agentpet run [--session id] [--project path] [--agent kind] -- <command...>`
@@ -175,6 +251,8 @@ struct Payload {
     desc: String,
     transcript: String,
     subagent: String,
+    terminal_program: String,
+    terminal_focus_url: String,
 }
 
 impl Payload {
@@ -183,7 +261,9 @@ impl Payload {
             "agent": self.agent, "event": self.event, "session": self.session,
             "project": self.project, "message": self.message, "tool": self.tool,
             "file": self.file, "desc": self.desc, "transcript": self.transcript,
-            "subagent": self.subagent, "ts": now_millis(),
+            "subagent": self.subagent,
+            "terminalProgram": self.terminal_program, "terminalFocusUrl": self.terminal_focus_url,
+            "ts": now_millis(),
         })
         .to_string()
     }

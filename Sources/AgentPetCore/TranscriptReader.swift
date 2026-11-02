@@ -19,6 +19,33 @@ public enum TranscriptReader {
     nonisolated(unsafe) private static var recapCache: [String: String] = [:]
     // Byte offset already consumed by `newUsageTokens` per transcript path.
     nonisolated(unsafe) private static var usageOffsets: [String: UInt64] = [:]
+    /// Usage lines timestamped before this moment are not counted. The app sets
+    /// it at launch: offsets live in memory, so after a relaunch every transcript
+    /// is read from the start again, and a resumed session copies its earlier
+    /// replies into a new file. `nil` counts everything.
+    nonisolated(unsafe) public static var countUsageSince: Date?
+    // Message ids already counted, across transcripts: Claude Code writes one
+    // line per content block of a reply, each repeating the reply's usage, and a
+    // resumed session copies replies into a new file. Oldest ids are dropped
+    // past `countedLimit`.
+    nonisolated(unsafe) private static var countedIDs = Set<String>()
+    nonisolated(unsafe) private static var countedOrder: [String] = []
+    private static let countedLimit = 20_000
+    // Only used under `stateLock`.
+    nonisolated(unsafe) private static let usageTimestamp: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    // Guards `usageOffsets` and the token/cost scan against concurrent callers.
+    private static let stateLock = NSLock()
+
+    /// Tokens + estimated USD cost computed together from one scan, so callers
+    /// never observe a token count paired with a mismatched cost.
+    public struct UsageDelta: Equatable {
+        public let tokens: Int
+        public let costUSD: Double
+    }
 
     /// Returns the title for the transcript at `path`, or `nil` if unreadable.
     public static func title(at path: String) -> String? {
@@ -79,42 +106,53 @@ public enum TranscriptReader {
 
     /// Clears cached titles — useful after fixing the extraction logic at runtime.
     public static func clearCache() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         summaryCache.removeAll()
         recapCache.removeAll()
         usageOffsets.removeAll()
+        countedIDs.removeAll()
+        countedOrder.removeAll()
     }
 
-    /// Sums the model usage tokens (input + output) that were *appended* to the
-    /// transcript since the previous call for the same path. The first call for
-    /// a path consumes the whole file. Feeds the pet: each Claude `Stop` reads
-    /// only the new bytes, so repeated calls are cheap even on big transcripts.
-    ///
-    /// Returns `nil` when the file can't be read; `0` when no new usage lines
-    /// appeared.
+    /// Sums the model usage tokens (input + output) appended since the previous call for `path`. The first call consumes the whole file; returns `nil` if unreadable, `0` if nothing new. Each reply counts once, and replies timestamped before `countUsageSince` don't count.
     public static func newUsageTokens(at path: String) -> Int? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return scanUsageDelta(path)?.tokens
+    }
+
+    /// Same scan as `newUsageTokens`, but returns tokens and estimated USD cost together from one pass so the two values can never mismatch. `nil` when unreadable.
+    public static func newUsageDelta(at path: String) -> UsageDelta? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return scanUsageDelta(path)
+    }
+
+    // Advances usageOffsets[path] past every complete new line and returns the summed tokens/cost. Callers must hold stateLock.
+    private static func scanUsageDelta(_ path: String) -> UsageDelta? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
 
         let size = (try? handle.seekToEnd()) ?? 0
         var start = usageOffsets[path] ?? 0
         if start > size { start = 0 }   // truncated/replaced file: start over
-        guard size > start else { return 0 }
+        guard size > start else { return UsageDelta(tokens: 0, costUSD: 0) }
 
         try? handle.seek(toOffset: start)
         let raw = handle.readDataToEndOfFile()
-
-        // Only consume up to the last full line; a partial trailing line (still
-        // being written) is left for the next call.
+        // Only consume up to the last full line; a partial trailing line is left for the next call.
         let consumable: Data
         if let nl = raw.lastIndex(of: UInt8(ascii: "\n")) {
             consumable = raw[raw.startIndex...nl]
         } else {
-            return 0
+            return UsageDelta(tokens: 0, costUSD: 0)
         }
         usageOffsets[path] = start + UInt64(consumable.count)
 
-        guard let text = String(data: consumable, encoding: .utf8) else { return 0 }
+        guard let text = String(data: consumable, encoding: .utf8) else { return UsageDelta(tokens: 0, costUSD: 0) }
         var total = 0
+        var costAccumulator = 0.0
         for line in text.components(separatedBy: "\n") {
             // Fast reject: most lines carry no usage object at all.
             guard line.contains("\"usage\"") else { continue }
@@ -123,10 +161,30 @@ public enum TranscriptReader {
                   let message = json["message"] as? [String: Any],
                   let usage = message["usage"] as? [String: Any]
             else { continue }
-            total += (usage["input_tokens"] as? Int ?? 0)
-            total += (usage["output_tokens"] as? Int ?? 0)
+            if let since = countUsageSince, let stamp = json["timestamp"] as? String,
+               let at = usageTimestamp.date(from: stamp), at < since { continue }
+            if let id = message["id"] as? String, !id.isEmpty {
+                guard countedIDs.insert(id).inserted else { continue }
+                countedOrder.append(id)
+                if countedOrder.count > countedLimit {
+                    let dropped = countedOrder.prefix(countedLimit / 2)
+                    countedIDs.subtract(dropped)
+                    countedOrder.removeFirst(dropped.count)
+                }
+            }
+            let inputTokens = usage["input_tokens"] as? Int ?? 0
+            let outputTokens = usage["output_tokens"] as? Int ?? 0
+            total += inputTokens
+            total += outputTokens
+            costAccumulator += ModelPricing.costUSD(
+                model: message["model"] as? String,
+                inputTokens: inputTokens,
+                outputTokens: outputTokens,
+                cacheCreateTokens: usage["cache_creation_input_tokens"] as? Int ?? 0,
+                cacheReadTokens: usage["cache_read_input_tokens"] as? Int ?? 0
+            )
         }
-        return total
+        return UsageDelta(tokens: total, costUSD: costAccumulator)
     }
 
     // MARK: - Codex (rollout) usage
@@ -137,6 +195,8 @@ public enum TranscriptReader {
     /// per turn; we sum fresh input (minus cached) + output to mirror Claude's
     /// `input_tokens + output_tokens`, so the leaderboard is comparable (#29).
     public static func newCodexUsageTokens(at path: String) -> Int? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
 

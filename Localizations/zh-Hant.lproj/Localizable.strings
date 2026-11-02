@@ -349,6 +349,9 @@
 /* Care v5: native limits + to-next-level */
 "≈ %@ tokens to Lv %d" = "≈ %@ token 升到 Lv %d";
 "Subscription limits" = "訂閱額度";
+"Show %@ in Limits" = "在額度中顯示 %@";
+"Hidden providers stay out of the stats card and don't make your pet anxious." = "隱藏的服務不會出現在統計卡片中，也不會讓寵物焦慮。";
+"OpenUsage isn't responding, so the providers only it supplies are hidden." = "OpenUsage 沒有回應，因此只由它提供的服務已被隱藏。";
 "Read directly from your Claude Code / Codex sign-ins." = "直接從你的 Claude Code / Codex 登入讀取。";
 "Read directly from your Claude Code / Codex sign-ins. None found yet." = "直接從你的 Claude Code / Codex 登入讀取。暫未找到。";
 "Connected: adds limits for every other provider." = "已連線：補充其他所有服務商的額度。";
@@ -505,7 +508,6 @@
 "The home pet nudges you to rest after a work stretch." = "主寵物會在你工作一段時間後提醒休息。";
 "Turn off to freeze pet/bubble animation (lower CPU)." = "關閉以凍結寵物/氣泡動畫（降低 CPU）。";
 "missing" = "缺失";
-
 /* Focus block */
 "Focus block" = "專注封鎖";
 "Block distracting sites" = "封鎖分心網站";
@@ -517,3 +519,22 @@
 "One-time setup: install the extension" = "一次性設定：安裝擴充功能";
 "Installs the app↔browser bridge and opens the extension folder. Then load it unpacked at chrome://extensions (once per profile you want protected)." = "安裝應用↔瀏覽器橋接並開啟擴充功能資料夾。然後在 chrome://extensions 載入未封裝的擴充功能（每個要保護的設定檔各一次）。";
 "Set up" = "設定";
+
+"Est. cost (Claude)" = "預估費用（Claude）";
+"Today %@ · Month %@" = "今天 %@ · 本月 %@";
+"Allow" = "允許";
+"Deny" = "拒絕";
+"Click to open this terminal" = "點擊開啟此終端";
+"Bash approval gate" = "Bash 審批開關";
+"Approve Bash from the bubble" = "在氣泡中審批 Bash";
+"Claude Code Bash requests show Allow/Deny in the bubble instead of the terminal." = "Claude Code 的 Bash 請求會在氣泡中顯示允許/拒絕，而不必回到終端。";
+"Project names" = "專案名稱";
+"No projects seen yet." = "尚未發現專案。";
+"Projects used in the last 7 days. Show a friendlier name instead of the folder name in the bubble and notifications. Leave empty to use the folder name." = "最近 7 天使用過的專案。在氣泡和通知中顯示更易讀的名稱，取代資料夾名。留空則使用資料夾名。";
+"By agent" = "按 Agent";
+"Today · Month" = "今天 · 本月";
+"1 session" = "1 個工作階段";
+"%d sessions" = "%d 個工作階段";
+"Show less" = "收合";
+"Show %d more" = "再顯示 %d 項";
+"Limit" = "額度";

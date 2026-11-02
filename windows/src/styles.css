@@ -65,6 +65,12 @@ body.overlay, body.overlay * {
   border-top: 7px solid var(--bubble-bg, rgba(22, 24, 38, 0.92));
   border-bottom: 0;
 }
+.bubble .brow.focusable { cursor: pointer; border-radius: 6px; transition: background 0.12s; }
+.bubble .brow.focusable:hover { background: rgba(127, 127, 127, 0.16); }
+.bubble .approval { display: inline-flex; gap: 4px; margin-left: 6px; }
+.bubble .approval button { font: inherit; font-size: 10px; font-weight: 600; border: none; border-radius: 999px; padding: 1px 8px; cursor: pointer; }
+.bubble .approval .ap-allow { background: rgba(34, 197, 94, 0.18); color: #22c55e; }
+.bubble .approval .ap-deny { background: rgba(220, 60, 60, 0.18); color: #dc3c3c; }
 .bubble .brow {
   display: flex;
   align-items: center;
@@ -644,6 +650,45 @@ body.settings:not(.demo-open) .main-col { flex: 1 1 auto; width: auto; }
 .bubble .icon-slot { display: inline-flex; align-items: center; flex: 0 0 auto; }
 .bubble .icon-slot.emoji { font-size: 12px; line-height: 14px; }
 .bubble .icon-slot .aicon { width: 14px; height: 14px; }
+/* First-run onboarding overlay (parity with the macOS OnboardingView). */
+#onboarding {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg, #1c1c1e);
+  padding: 28px;
+}
+#onboarding[hidden] { display: none !important; }
+.ob-card { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: 22px; }
+.ob-head { display: flex; align-items: center; gap: 14px; }
+.ob-logo {
+  width: 42px; height: 42px; border-radius: 11px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; font-size: 22px;
+  background: rgba(255,255,255,0.08);
+}
+.ob-title { font-size: 20px; font-weight: 700; }
+.ob-sub { font-size: 13px; opacity: 0.65; margin-top: 3px; }
+.ob-steps { display: flex; flex-direction: column; gap: 12px; }
+.ob-step { display: flex; align-items: flex-start; gap: 12px; }
+.ob-n {
+  width: 24px; height: 24px; border-radius: 50%; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: #fff; background: #6366F1;
+}
+.ob-st { font-size: 14px; font-weight: 600; }
+.ob-sd { font-size: 12.5px; opacity: 0.62; margin-top: 2px; }
+.ob-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+.prim-btn {
+  background: #6366F1; border: 0; border-radius: 8px; color: #fff;
+  padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.prim-btn:hover { filter: brightness(1.08); }
+
+/* Lettered badge for a custom agent with no brand logo (issue #56). */
+.bubble .icon-slot.letter {
+  width: 14px; height: 14px; border-radius: 50%;
+  justify-content: center; color: #fff;
+  font-size: 9px; font-weight: 700; line-height: 14px;
+}
 
 /* ---- mac-exact tweaks ---- */
 .small-btn {
@@ -775,6 +820,9 @@ body.pop {
 .pop-agent .sess-x { visibility: hidden; }
 .pop-agent:hover .sess-x { visibility: visible; }
 .pop-empty { padding: 4px 14px 10px; }
+.pop-limit { padding: 2px 14px 10px; }
+.pop-limit-name { font-size: 12px; font-weight: 600; }
+.pop-limit .limit-row { margin-top: 5px; }
 #pop-list { overflow-y: auto; max-height: 150px; flex: 0 1 auto; padding-bottom: 6px; }
 .pop-row { display: flex; align-items: center; gap: 9px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
 .pop-row .ui-ic { margin-right: 0; color: rgba(255,255,255,0.8); }
@@ -808,7 +856,8 @@ body.pop {
 /* ---- Care tab (tamagotchi HUD) ---- */
 .care-hud { display: flex; flex-direction: column; gap: 12px; }
 .care-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.care-name { font-weight: 700; font-size: 16px; }
+.care-name { font-weight: 700; font-size: 16px; cursor: text; }
+.care-rename { font-weight: 700; font-size: 16px; width: 100%; max-width: 200px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; color: inherit; padding: 2px 6px; outline: none; }
 .care-stage { opacity: .7; font-size: 12px; margin-top: 2px; }
 .care-hunger { font-size: 12px; opacity: .8; white-space: nowrap; }
 .care-bar { height: 8px; border-radius: 999px; background: rgba(127,127,127,.22); overflow: hidden; }
@@ -820,6 +869,15 @@ body.pop {
 .cs-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
 .cs-sub { font-size: 11px; opacity: .55; }
 .care-charthead { display: flex; justify-content: space-between; font-size: 11px; opacity: .7; margin-top: 2px; }
+.limit-prov { padding: 6px 0 2px; }
+.limit-prov + .limit-prov { border-top: 1px solid rgba(127,127,127,.18); }
+.limit-row { margin-top: 6px; }
+.limit-head { display: flex; gap: 6px; align-items: baseline; font-size: 11px; }
+.limit-head .lbl { opacity: .7; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.limit-head .pct { font-weight: 600; }
+.limit-head .rst { opacity: .6; white-space: nowrap; }
+.limit-bar { height: 5px; border-radius: 999px; background: rgba(127,127,127,.18); overflow: hidden; margin-top: 3px; }
+.limit-bar > div { height: 100%; border-radius: 999px; min-width: 2px; }
 .care-chart { display: flex; align-items: flex-end; gap: 6px; height: 72px; }
 .cbar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
 .cbar { width: 100%; background: #f5a623; border-radius: 4px 4px 0 0; min-height: 3px; }

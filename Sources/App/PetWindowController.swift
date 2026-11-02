@@ -20,11 +20,14 @@ final class PetWindowController: ObservableObject {
         let panel: NSPanel
         let model: PetWindowModel
         var moveObserver: Any?
+        var occlusionObserver: Any?
 
         /// Screen position of the pet's bottom-center; kept stable across resizes.
         var anchorBottomCenter: NSPoint?
         var lastContentSize: CGSize = .zero
         var resizeDebounce: DispatchWorkItem?
+        /// Re-fits the window onto the pet's screen once a drag settles.
+        var relayoutDebounce: DispatchWorkItem?
 
         init(panel: NSPanel, model: PetWindowModel) {
             self.panel = panel
@@ -39,6 +42,9 @@ final class PetWindowController: ObservableObject {
     private var chatLineCancellable: AnyCancellable?
     private var rightClickMonitor: Any?
     private var screenObserver: Any?
+    private var sleepObservers: [Any] = []
+    /// True while displays sleep or the session is locked/switched away.
+    private var screensAsleep = false
 
     private static let positionsKey = "agentpet.petPositions"
 
@@ -65,6 +71,26 @@ final class PetWindowController: ObservableObject {
             MainActor.assumeIsolated { self?.ensureAllOnScreen() }
         }
 
+        // Pause animations while nobody can see the pets: displays asleep,
+        // screen locked / fast user switch. Occlusion (covered, hidden) is
+        // tracked per panel in `ensureWindow`.
+        let ws = NSWorkspace.shared.notificationCenter
+        let pauses: [(Notification.Name, Bool)] = [
+            (NSWorkspace.screensDidSleepNotification, true),
+            (NSWorkspace.screensDidWakeNotification, false),
+            (NSWorkspace.sessionDidResignActiveNotification, true),
+            (NSWorkspace.sessionDidBecomeActiveNotification, false),
+        ]
+        sleepObservers = pauses.map { name, asleep in
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.screensAsleep = asleep
+                    for managed in self.windows.values { self.updateOnScreen(managed) }
+                }
+            }
+        }
+
         // Right-click a pet to show ITS stats card (info only — controls stay in
         // the menu bar popover and Settings). Resolve which window via its panel.
         rightClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
@@ -72,9 +98,16 @@ final class PetWindowController: ObservableObject {
                 guard let self,
                       let managed = self.windows.values.first(where: { event.window === $0.panel }),
                       let content = managed.panel.contentView else { return false }
-                // Anchor to the whole content rect so the popover sits entirely
-                // outside the window (above it) and never overlaps the pet.
-                self.showStatsPopover(relativeTo: content.bounds, of: content, petID: managed.model.petID)
+                // Anchor to a full-height sliver at the pet's x: full height so
+                // the popover sits entirely above the window and never overlaps
+                // the pet, and centred on the pet (window centre + petOffset)
+                // so the arrow points at it when the pet is offset inside a
+                // window pushed back on screen. A shifted full-width rect would
+                // be clipped to the view, moving the arrow only half as far.
+                let b = content.bounds
+                let anchor = NSRect(x: b.midX + managed.model.petOffset - 1, y: b.minY,
+                                    width: 2, height: b.height)
+                self.showStatsPopover(relativeTo: anchor, of: content, petID: managed.model.petID)
                 return true
             }
             return handled ? nil : event
@@ -164,12 +197,28 @@ final class PetWindowController: ObservableObject {
                 guard let self, let managed = self.windows[key] else { return }
                 self.syncAnchor(managed)
                 self.savePosition(managed)
+                self.scheduleRelayout(managed)
+            }
+        }
+        managed.occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main
+        ) { [weak self, key] _ in
+            MainActor.assumeIsolated {
+                guard let self, let managed = self.windows[key] else { return }
+                self.updateOnScreen(managed)
             }
         }
 
         placeWindow(managed, size: size, index: index)
         syncAnchor(managed)
         return managed
+    }
+
+    /// Recomputes whether a pet can be seen; only publishes on change so
+    /// SwiftUI is not invalidated by redundant occlusion callbacks.
+    private func updateOnScreen(_ managed: ManagedPetWindow) {
+        let visible = !screensAsleep && managed.panel.occlusionState.contains(.visible)
+        if managed.model.isOnScreen != visible { managed.model.isOnScreen = visible }
     }
 
     /// Factory: a borderless, non-activating, floating, click-through panel.
@@ -195,7 +244,11 @@ final class PetWindowController: ObservableObject {
     /// bottom-right anchor shifted left by `index` so windows don't stack.
     private func placeWindow(_ managed: ManagedPetWindow, size: CGSize, index: Int) {
         if let origin = savedPosition(forKey: managed.model.key) {
-            managed.panel.setFrame(NSRect(origin: origin, size: size), display: true, animate: false)
+            // Clamp the restored position onto a live screen: a coordinate saved
+            // on a larger/other display can land off-screen after a resolution or
+            // monitor change, hiding the pet forever otherwise (issue #47).
+            let clamped = clampedOntoScreen(origin, size: size)
+            managed.panel.setFrame(NSRect(origin: clamped, size: size), display: true, animate: false)
             return
         }
         guard let visible = NSScreen.main?.visibleFrame else { return }
@@ -210,7 +263,9 @@ final class PetWindowController: ObservableObject {
     private func teardownWindow(forKey key: String) {
         guard let managed = windows.removeValue(forKey: key) else { return }
         managed.resizeDebounce?.cancel()
+        managed.relayoutDebounce?.cancel()
         if let obs = managed.moveObserver { NotificationCenter.default.removeObserver(obs) }
+        if let obs = managed.occlusionObserver { NotificationCenter.default.removeObserver(obs) }
         managed.panel.orderOut(nil)
     }
 
@@ -228,12 +283,28 @@ final class PetWindowController: ObservableObject {
     }
 
     private func savePosition(_ managed: ManagedPetWindow) {
-        let origin = managed.panel.frame.origin
+        // Store the origin a pet-centred window would have (undo the in-window
+        // pet offset), so a relaunch restores the pet, not the shifted window.
+        var origin = managed.panel.frame.origin
+        origin.x += managed.model.petOffset
         var all = loadPositions()
         all[managed.model.key] = [Double(origin.x), Double(origin.y)]
         if let data = try? JSONEncoder().encode(all) {
             UserDefaults.standard.set(data, forKey: Self.positionsKey)
         }
+    }
+
+    // MARK: - Drag to move (pet body)
+
+    /// Current on-screen origin of a window, so a pet-body drag can anchor from it.
+    func windowOrigin(forKey key: String) -> NSPoint? {
+        windows[key]?.panel.frame.origin
+    }
+
+    /// Moves a window during a pet-body drag. `didMoveNotification` fires, which
+    /// re-anchors and persists the position exactly like a window-background drag.
+    func moveWindow(forKey key: String, to origin: NSPoint) {
+        windows[key]?.panel.setFrameOrigin(origin)
     }
 
     // MARK: - Stats popover (per window)
@@ -254,7 +325,14 @@ final class PetWindowController: ObservableObject {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = NSHostingController(rootView: PetStatsView(petID: petID))
+        let host = NSHostingController(rootView: PetStatsView(petID: petID))
+        // Size the popover to the card before showing it. Otherwise AppKit
+        // places it for the hosting view's provisional size and, in binaries
+        // linked against an older SDK, does not move it back on screen when the
+        // card grows, so a pet near a screen edge gets a clipped card.
+        let fitting = host.view.fittingSize
+        if fitting.width > 0, fitting.height > 0 { popover.contentSize = fitting }
+        popover.contentViewController = host
         statsPopover = popover
         // Prefer above the pet; AppKit flips to below only if there's no room.
         // In a flipped content view "above" is the minY edge.
@@ -271,18 +349,34 @@ final class PetWindowController: ObservableObject {
     /// Sizes the panel hosting `key` to hug the pet + bubble content.
     func resizeToContent(_ size: CGSize, forKey key: String) {
         guard size.width > 0, size.height > 0, let managed = windows[key] else { return }
+        ResizeMetrics.log("content", size)
 
         managed.resizeDebounce?.cancel()
+        // Growing content is drawn clipped until the window catches up, so
+        // widen/heighten right away (never shrinking in this step). The exact
+        // fit, including any shrink, still waits for the debounce so a burst
+        // of intermediate sizes (spring animations) doesn't jitter the window.
+        let current = managed.panel.frame.size
+        let target = Self.padded(size)
+        if target.width > current.width + 1 || target.height > current.height + 1 {
+            resizeIfChanged(managed, to: CGSize(width: max(target.width, current.width),
+                                                height: max(target.height, current.height)))
+        }
         let work = DispatchWorkItem { [weak self] in
             guard let self, let managed = self.windows[key] else { return }
-            self.applyContentResize(size, to: managed)
+            self.resizeIfChanged(managed, to: Self.padded(size))
         }
         managed.resizeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
     }
 
-    private func applyContentResize(_ size: CGSize, to managed: ManagedPetWindow) {
-        let padded = CGSize(width: size.width + 4, height: size.height + 4)
+    /// Window size for measured content: a small margin on every side.
+    private static func padded(_ content: CGSize) -> CGSize {
+        CGSize(width: content.width + 4, height: content.height + 4)
+    }
+
+    /// Resizes to `padded` unless it is within 1pt of the last applied size.
+    private func resizeIfChanged(_ managed: ManagedPetWindow, to padded: CGSize) {
         let dw = abs(padded.width - managed.lastContentSize.width)
         let dh = abs(padded.height - managed.lastContentSize.height)
         guard dw > 1 || dh > 1 || managed.lastContentSize == .zero else { return }
@@ -309,27 +403,80 @@ final class PetWindowController: ObservableObject {
 
     private func syncAnchor(_ managed: ManagedPetWindow) {
         let frame = managed.panel.frame
-        managed.anchorBottomCenter = NSPoint(x: frame.midX, y: frame.minY)
+        managed.anchorBottomCenter = NSPoint(x: frame.midX + managed.model.petOffset, y: frame.minY)
     }
 
     /// Resizes around a fixed bottom-center anchor so the pet doesn't drift.
-    /// The pet stays pinned to its bottom-center; the bubble (centred above the
-    /// pet) is free to grow wider/taller. We deliberately do NOT clamp the X
-    /// origin to the screen: clamping a wide bubble back on-screen would shove
-    /// the window , and therefore the pet , sideways. Keeping the pet put is
-    /// more important than the bubble's far edge staying fully on-screen.
+    /// The window is kept inside the visible frame of the pet's screen so a wide
+    /// bubble never spills onto a neighbouring display; when that pushes the
+    /// window sideways, the pet (and the bubble's tail) is offset inside the
+    /// window by the same amount, so the pet itself stays put on screen.
     private func resizeInPlace(_ managed: ManagedPetWindow, to size: CGSize) {
         if managed.anchorBottomCenter == nil { syncAnchor(managed) }
         guard let anchor = managed.anchorBottomCenter else { return }
 
-        // X: keep the pet's centre fixed (no clamp -> no sideways jump).
         var origin = NSPoint(x: anchor.x - size.width / 2, y: anchor.y)
-        // Y: only nudge down if the taller bubble would run off the top.
         let probe = NSRect(origin: origin, size: size)
-        if let visible = currentScreen(for: probe)?.visibleFrame, origin.y + size.height > visible.maxY {
-            origin.y = visible.maxY - size.height
+        // A pet dropped outside every screen still gets fitted, onto the
+        // closest one, instead of being left off screen.
+        let visible = (screen(containing: anchor, fallback: probe) ?? nearestScreen(to: anchor))?.visibleFrame
+        var petOffset: CGFloat = 0
+        if let visible {
+            let petWidth = PetController.shared.petPoint
+            let layout = PetWindowGeometry.horizontalLayout(
+                anchorX: anchor.x, width: size.width, petWidth: petWidth,
+                visibleMinX: visible.minX, visibleMaxX: visible.maxX)
+            origin.x = layout.originX
+            petOffset = layout.petOffset
+        }
+        // Y: keep the window between the screen's bottom (or the Dock) and the
+        // menu bar, so a pet dragged past either edge comes back on release.
+        // X stays as horizontalLayout placed it (the pet may sit offset inside).
+        if let visible {
+            origin.y = PetWindowGeometry.clampOrigin(origin, size: size, into: visible).y
+        }
+        // Publish the offset before moving: the didMove observer re-derives
+        // the anchor from frame + petOffset.
+        if managed.model.petOffset != petOffset || managed.model.windowWidth != size.width {
+            managed.model.petOffset = petOffset
+            managed.model.windowWidth = size.width
+            // Flush the new offset into the hosting view now, so the window
+            // move and the pet's counter-shift land in the same frame
+            // (otherwise the pet flashes at the old spot for one frame).
+            managed.panel.contentView?.layoutSubtreeIfNeeded()
         }
         managed.panel.setFrame(NSRect(origin: origin, size: size), display: true, animate: false)
+        ResizeMetrics.log("window", size)
+    }
+
+    /// After the user drags a pet (window or pet body), re-fit it onto the
+    /// pet's screen once the mouse is released. Waiting for release keeps the
+    /// pet-body drag math (start origin + mouse delta) consistent mid-drag.
+    private func scheduleRelayout(_ managed: ManagedPetWindow) {
+        managed.relayoutDebounce?.cancel()
+        let key = managed.model.key
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let managed = self.windows[key] else { return }
+            if NSEvent.pressedMouseButtons & 1 != 0 { self.scheduleRelayout(managed); return }
+            let before = managed.panel.frame
+            self.resizeInPlace(managed, to: before.size)
+            if managed.panel.frame != before { self.savePosition(managed) }
+        }
+        managed.relayoutDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    /// The screen holding the pet's bottom-center (so a wide window is fitted
+    /// to the display the pet is on), else the one holding the window center.
+    private func screen(containing anchor: NSPoint, fallback frame: NSRect) -> NSScreen? {
+        let p = NSPoint(x: anchor.x, y: anchor.y + 1)
+        return NSScreen.screens.first { NSPointInRect(p, $0.frame) } ?? currentScreen(for: frame)
+    }
+
+    /// The screen whose visible area is closest to `point`.
+    private func nearestScreen(to point: NSPoint) -> NSScreen? {
+        let screens = NSScreen.screens
+        return PetWindowGeometry.nearestRectIndex(to: point, in: screens.map(\.visibleFrame)).map { screens[$0] }
     }
 
     /// Keeps every pet visible after a display configuration change: if a pet's
@@ -340,11 +487,19 @@ final class PetWindowController: ObservableObject {
 
     private func ensureOnScreen(_ managed: ManagedPetWindow) {
         let frame = managed.panel.frame
-        if currentScreen(for: frame) != nil { return }   // still on a live screen
-        guard let visible = NSScreen.main?.visibleFrame else { return }
-        let origin = NSPoint(x: visible.maxX - frame.width - 16, y: visible.minY + 24)
-        managed.panel.setFrameOrigin(origin)
+        let clamped = clampedOntoScreen(frame.origin, size: frame.size)
+        guard clamped != frame.origin else { return }   // already fully visible
+        managed.panel.setFrameOrigin(clamped)
         syncAnchor(managed)
+    }
+
+    /// Clamps `origin` so a window of `size` sits fully inside the visible frame
+    /// of the screen it's mostly on (or the main screen if it's off every screen).
+    private func clampedOntoScreen(_ origin: NSPoint, size: CGSize) -> NSPoint {
+        let frame = NSRect(origin: origin, size: size)
+        let screen = currentScreen(for: frame) ?? NSScreen.main
+        guard let visible = screen?.visibleFrame else { return origin }
+        return PetWindowGeometry.clampOrigin(origin, size: size, into: visible)
     }
 
     /// The screen whose frame contains the window's center, if any.

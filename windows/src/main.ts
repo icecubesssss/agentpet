@@ -2,7 +2,7 @@ import { listen, emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Pet } from "./pet";
-import { SessionStore, aggregateMood, basename, type AgentEventPayload } from "./state";
+import { SessionStore, aggregateMood, type AgentEventPayload } from "./state";
 import { BubbleRenderer } from "./bubble";
 import { loadCatalog, savedSlug, saveSlug } from "./catalog";
 import { t, setLang, type Lang } from "./i18n";
@@ -11,12 +11,52 @@ import * as care from "./care";
 import * as sync from "./sync";
 import * as usage from "./usage";
 import * as history from "./history";
+import * as reactive from "./reactive";
+import * as projectpets from "./projectpets";
+import * as limits from "./limits";
+import { projectLabel } from "./projectnames";
+
+// Which project THIS pet window represents. `null` = the main window (the
+// default single pet). Split-pet spawns extra windows with `?project=<id>`.
+const MY_PROJECT = new URLSearchParams(location.search).get("project");
+const IS_MAIN = MY_PROJECT === null;
+// WebView2 (Windows) vs WebKitGTK (Linux): picks the native sound path below.
+const IS_WINDOWS = navigator.userAgent.includes("Windows");
+
+// A project window sets this the moment its project is un-split, so it stops
+// feeding during the brief async gap before Rust closes it (else the main window
+// , which now owns the project , and this dying window would both feed one event).
+let windowDead = false;
+
+/// Does this window own a session (feed its pet, count it, notify)? Split off:
+/// the main window owns everything. Split on: a project window owns only its
+/// project; the main window owns every unconfigured project.
+function ownsProject(path: string): boolean {
+  if (windowDead) return false;
+  if (!projectpets.splitEnabled()) return IS_MAIN;
+  const id = usage.projectId(path || "");
+  if (MY_PROJECT) return id === MY_PROJECT;
+  return !projectpets.configuredProjectIds().includes(id);
+}
+
+/// The pet slug this window raises (a project window uses its mapped pet).
+function myPetSlug(): string | null {
+  if (MY_PROJECT && projectpets.splitEnabled()) return projectpets.petForProject(MY_PROJECT) || savedSlug();
+  return savedSlug();
+}
+
+/// Reconcile the per-project pet windows with the current config (main only).
+function syncProjectWindows() {
+  const ids = projectpets.splitEnabled() ? projectpets.configuredProjectIds() : [];
+  void invoke("sync_project_windows", { projects: ids });
+}
 import { sendNotification, isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 
 // Auto-update on launch (no-op offline / when no signed release is published).
-(async () => {
+// Main window only , the per-project windows share the same binary.
+if (IS_MAIN) (async () => {
   try {
     const update = await check();
     if (update) {
@@ -68,8 +108,9 @@ function applyPet() {
 }
 applyPet();
 
-// Simple synthesized chimes (no audio assets needed). Per-event enable, like
-// the macOS SoundSettings (done = high glass-ish, waiting = lower submarine).
+// Per-event enable + custom file, like the macOS SoundSettings. The default
+// sound is a real system sound on Windows (Rust `play_sound`, the macOS
+// Glass/Submarine equivalent); the synthesized chime is only the Linux fallback.
 let audioCtx: AudioContext | null = null;
 function chime(event: "done" | "waiting") {
   const key = event === "done" ? "ap_sound_done" : "ap_sound_waiting";
@@ -81,6 +122,7 @@ function chime(event: "done" | "waiting") {
   if (data) {
     try { void new Audio(data).play(); return; } catch {}
   }
+  if (IS_WINDOWS) { invoke("play_sound", { event }).catch(() => {}); return; }
   try {
     audioCtx = audioCtx || new AudioContext();
     const o = audioCtx.createOscillator();
@@ -97,6 +139,12 @@ function chime(event: "done" | "waiting") {
 
 // --- pick + load a pet sprite -------------------------------------------------
 (async () => {
+  // A project window raises its mapped pet; the main window the selected one.
+  if (MY_PROJECT) {
+    const slug = projectpets.petForProject(MY_PROJECT);
+    const url = slug ? projectpets.libUrlForSlug(slug) : null;
+    if (url) { pet.load(url); return; }
+  }
   // Library selection (Browse/Create) wins; legacy ap_pet_custom still honoured.
   const url = localStorage.getItem("ap_pet_custom") || localStorage.getItem("ap_pet_url");
   if (url) { pet.load(url); return; }
@@ -124,17 +172,39 @@ let celebrateUntil = 0;
 let wasCelebrating = false;
 let prevSimpleMood = "";
 let moodLine = ""; // the single-bubble line for idle/done/celebrate
+let reactiveLine = "";
+let reactiveUntil = 0;
+
+/// Show a reactive comment for a few seconds (mac PetController.flashReactiveLine).
+function flashReactive(line: string | null) {
+  if (!line) return;
+  reactiveLine = line;
+  reactiveUntil = Date.now() + 5000;
+}
+
+/// Evaluate the care-driven reactive metrics after a feed / meal / hunger tick.
+function evaluateCareMetrics() {
+  const slug = myPetSlug();
+  if (!slug) return;
+  const s = care.stateFor(slug);
+  flashReactive(reactive.evaluate("dailyTokens", s.tokensToday));
+  flashReactive(reactive.evaluate("streak", s.streakDays));
+  flashReactive(reactive.evaluate("dailyMeals", s.mealsToday));
+  flashReactive(reactive.evaluate("hunger", care.hunger(s)));
+}
 
 function pickMoodLine(mood: string) {
   // Custom/system pools; working/waiting fall back to the PetChat lines so the
   // simple-bubble mode (multi-agent off) always has something to say.
   let pool = bubbleLines(null, mood);
   if (!pool.length) pool = PET_CHAT[mood] ?? [];
+  // A nearly spent subscription makes the idle pet anxious (mac CareChat.idlePool).
+  if (mood === "idle" && limits.limitLow(limits.cached())) pool = [...pool, ...limits.ANXIOUS.map(t)];
   moodLine = pool.length ? pool[Math.floor(Math.random() * pool.length)] : "";
 }
 
 function render() {
-  const sessions = store.active();
+  const sessions = store.active().filter((s) => ownsProject(s.project));
   const resolved = aggregateMood(sessions);
 
   if (resolved === "done" && lastResolved !== "done") {
@@ -157,22 +227,28 @@ function render() {
   const mood = celebrating ? "celebrate" : resolved;
   pet.setState(mood);
 
+  // A reactive comment briefly overrides the quiet single-line moods (not the
+  // multi-agent working bubble, not the celebrate burst).
+  const reactiveActive = Date.now() < reactiveUntil && !!reactiveLine;
+
   const multi = localStorage.getItem("ap_multi") !== "0";
   if ((mood === "working" || mood === "waiting") && !multi) {
     // Simple-bubble mode (mac: multi-agent off) , one plain chat line.
     if (resolved !== prevSimpleMood) { pickMoodLine(mood); prevSimpleMood = resolved; }
     if (!moodLine) pickMoodLine(mood);
-    bubble.renderLine(moodLine);
+    bubble.renderLine(reactiveActive ? reactiveLine : moodLine);
   } else if (mood === "working" || mood === "waiting") {
     bubble.render(sessions.filter((s) => s.state !== "idle" && s.state !== "registered"));
   } else if (mood === "celebrate") {
     bubble.renderLine(moodLine || t("Done"));
   } else if (mood === "done") {
     if (!moodLine) pickMoodLine("done");
-    bubble.renderLine(moodLine);
+    bubble.renderLine(reactiveActive ? reactiveLine : moodLine);
   } else {
     // idle: a persistent quiet line (mac shows it continuously, no blinking)
-    if (localStorage.getItem("ap_idle") !== "0") {
+    if (reactiveActive) {
+      bubble.renderLine(reactiveLine);
+    } else if (localStorage.getItem("ap_idle") !== "0") {
       if (!moodLine) pickMoodLine("idle");
       bubble.renderLine(moodLine);
     } else {
@@ -182,9 +258,26 @@ function render() {
 
   snugBubble();
   reportHitRect();
-  reportTrayStatus(sessions);
+  // One global tray icon , the main window reports it, counting ALL sessions
+  // (not just this window's owned subset).
+  if (IS_MAIN) reportTrayStatus(store.active());
 }
 setInterval(render, 500);
+// Hunger decays over time, so evaluate it on a timer (not only after feeding,
+// when the pet is always full) , matching macOS's state-republish trigger.
+setInterval(() => {
+  const slug = myPetSlug();
+  if (slug) flashReactive(reactive.evaluate("hunger", care.hunger(care.stateFor(slug))));
+}, 60_000);
+// Subscription limits: only the main window calls the provider (every 5 min,
+// like mac NativeUsageProbe); project windows read the shared cache. Each
+// window comments on the tightest visible window via the rateLimit metric.
+async function pollLimits() {
+  const found = IS_MAIN ? await limits.refresh() : limits.cached();
+  flashReactive(reactive.evaluate("rateLimit", limits.lowestFractionLeft(found)));
+}
+setTimeout(() => { void pollLimits(); }, IS_MAIN ? 5_000 : 15_000);
+setInterval(() => { void pollLimits(); }, limits.POLL_MS);
 // Carousel advance / fold clicks request a prompt repaint.
 setInterval(() => { if (bubble.dirty) { bubble.dirty = false; render(); } }, 120);
 // Live elapsed clocks tick every second.
@@ -223,25 +316,34 @@ function maybeNotify(e: AgentEventPayload) {
     sessionStarts.set(key, Date.now());
   }
   if (e.state === prev) return;
-  // A finished session is a "meal" for the pet (records XP + streak).
-  if (e.state === "done") {
-    const slug = savedSlug();
-    if (slug) { care.mutate(slug, (s) => care.recordMeal(s)); emit("care-updated"); sync.schedulePush(); }
+  // A finished session is a "meal" for THIS window's pet , only the window that
+  // owns the project records it, so split pets never double-feed.
+  if (e.state === "done" && ownsProject(e.project)) {
+    const slug = myPetSlug();
+    if (slug) { care.mutate(slug, (s) => care.recordMeal(s)); emit("care-updated"); sync.schedulePush(); evaluateCareMetrics(); }
     if (e.project) usage.recordSession(e.project, e.agent);
     const now = Date.now();
     history.log({
-      id: e.session, agent: e.agent, project: e.project ? basename(e.project) : "",
+      id: e.session, agent: e.agent, project: e.project ? projectLabel(e.project) : "",
       title: e.title || "", startedAt: sessionStarts.get(key) ?? now, endedAt: now,
     });
   }
+  // Chimes + notifications fire once , the main window only.
+  if (!IS_MAIN) return;
   if (e.state !== "done" && e.state !== "waiting") return;
   chime(e.state === "done" ? "done" : "waiting");
   if (!notifyReady || localStorage.getItem("ap_notify") === "0") return;
-  const proj = (e.project ? basename(e.project) : "") || e.agent;
+  const proj = projectLabel(e.project || "") || e.agent;
   // Same copy as the macOS notifications.
   const title = e.state === "done" ? `${proj} ${t("finished")}` : `${proj} ${t("needs input")}`;
+  // jcode only: its hooks carry the agent's opening line (what this turn did),
+  // with the session title as a fallback (it goes stale, one per session). Other
+  // agents keep the generic text, like macOS.
+  const doneBody = e.agent === "jcode"
+    ? ((e.message ?? "").trim() || (store.snapshot().find((s) => s.agent === e.agent && s.session === e.session)?.title ?? "").trim()).slice(0, 200)
+    : "";
   const body = e.state === "done"
-    ? t("Agent completed its turn")
+    ? (doneBody || t("Agent completed its turn"))
     : (e.message || t("Waiting for you"));
   try { sendNotification({ title, body }); } catch {}
 }
@@ -250,6 +352,22 @@ function maybeNotify(e: AgentEventPayload) {
 listen<AgentEventPayload>("agent-event", (e) => {
   maybeNotify(e.payload);
   store.update(e.payload);
+  const owned = store.active().filter((s) => ownsProject(s.project)).length;
+  flashReactive(reactive.evaluate("sessionCount", owned));
+  render();
+});
+// Approval gate: the daemon parked a gated PreToolUse , show Allow/Deny.
+listen<{ id: string; session: string; tool: string; summary: string }>("agent-approval", (e) => {
+  const p = e.payload;
+  store.setApproval(p.session, { id: p.id, tool: p.tool, summary: p.summary });
+  render();
+});
+listen<{ id: string; session: string }>("agent-approval-resolved", (e) => {
+  store.clearApproval(e.payload.session);
+  render();
+});
+listen<{ agent: string; session: string; title: string }>("agent-title", (e) => {
+  store.setTitle(e.payload.agent, e.payload.session, e.payload.title);
   render();
 });
 listen<string>("agent-end", (e) => {
@@ -258,23 +376,42 @@ listen<string>("agent-end", (e) => {
   store.remove(e.payload);
   render();
 });
-// Tokens burned by an agent feed the currently-selected pet (Claude for now).
-listen<{ agent: string; session: string; project: string; tokens: number }>("agent-tokens", (e) => {
+// Tokens burned by an agent feed THIS window's pet , only the owning window, so
+// split pets never double-feed the same tokens.
+listen<{ agent: string; session: string; project: string; tokens: number; cost?: number; input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>("agent-tokens", (e) => {
   const n = e.payload?.tokens || 0;
   if (n <= 0) return;
   const p = e.payload;
-  if (p.project) usage.recordTokens(p.project, p.agent, n);
-  const slug = savedSlug();
+  if (!ownsProject(p.project)) return;
+  if (p.project) usage.recordTokens(p.project, p.agent, n, p.cost || 0, { input: p.input, output: p.output, cacheRead: p.cacheRead, cacheWrite: p.cacheWrite });
+  const slug = myPetSlug();
   if (!slug) return;
   care.mutate(slug, (s) => care.feedTokens(s, n));
   emit("care-updated");
   sync.schedulePush();
+  evaluateCareMetrics();
 });
 
-// On launch: pull any cloud progress, then keep pushing in the background.
-if (sync.signedIn()) {
+// On launch: pull any cloud progress, then keep pushing in the background. The
+// main window owns cloud sync (care state is shared across windows).
+if (IS_MAIN && sync.signedIn()) {
   sync.restore().then(() => { emit("care-updated"); sync.schedulePush(5000); }).catch(() => {});
   usage.schedulePush(8000);
+}
+// Split-pet: the main window spawns/closes the per-project pet windows, and
+// re-syncs whenever Settings changes the config.
+if (IS_MAIN) {
+  syncProjectWindows();
+  listen("split-changed", () => syncProjectWindows());
+} else {
+  // A project window: once split is off or its project is no longer configured,
+  // it's about to be closed , stop owning events immediately to avoid a
+  // double-feed with the main window during teardown.
+  listen("split-changed", () => {
+    if (!projectpets.splitEnabled() || (MY_PROJECT && !projectpets.configuredProjectIds().includes(MY_PROJECT))) {
+      windowDead = true;
+    }
+  });
 }
 // Settings window: dismiss one session / clear all (mac popover actions).
 listen<string>("session-dismiss", (e) => { store.removeKey(e.payload); render(); });
@@ -293,6 +430,28 @@ listen<{ slug: string; url: string }>("set-pet", (e) => {
 listen<Lang>("lang-changed", (e) => { setLang(e.payload); render(); });
 // Bubble theme / opacity / messages changed from Settings.
 listen("bubble-changed", () => { applyBubble(); applyPet(); moodLine = ""; render(); });
+
+// Tray "Check for updates" (Rust emits this to the main pet window only). The
+// popover has a labelled Updates button, but on Linux appindicator can't open
+// the popover from a tray click, so the tray menu item is the reliable entry
+// point. Feedback goes through notifications since the tray has no live label.
+listen("check-updates", async () => {
+  if (!IS_MAIN) return;
+  const note = (body: string) => { try { if (notifyReady) sendNotification({ title: "AgentPet", body }); } catch {} };
+  note(t("Checking…"));
+  try {
+    const update = await check();
+    if (update) {
+      note(t("Installing…"));
+      await update.downloadAndInstall();
+      await relaunch();
+    } else {
+      note(t("Up to date"));
+    }
+  } catch {
+    note(t("Up to date"));
+  }
+});
 
 // --- interactions ------------------------------------------------------------
 // Drag works only when grabbing the PET SPRITE itself or the bubble , clicks

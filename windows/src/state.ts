@@ -17,6 +17,11 @@ export interface Session {
   tool: string;
   updatedAt: number;
   stateSince: number;
+  /// Terminal this session runs in (for click-to-focus). Sticky.
+  terminalProgram: string;
+  terminalFocusUrl: string;
+  /// A gated tool call awaiting the user's Allow/Deny, if any.
+  pendingApproval?: { id: string; tool: string; summary: string };
 }
 
 export interface AgentEventPayload {
@@ -31,6 +36,8 @@ export interface AgentEventPayload {
   event?: string;
   title?: string | null;
   ts?: number;
+  terminalProgram?: string;
+  terminalFocusUrl?: string;
 }
 
 const PRIORITY: Record<string, number> = { working: 4, waiting: 3, done: 2, registered: 1, idle: 0 };
@@ -70,12 +77,33 @@ export class SessionStore {
       tool: e.tool ?? "",
       updatedAt: now,
       stateSince: prev && prev.state === e.state ? prev.stateSince : now,
+      terminalProgram: e.terminalProgram || prev?.terminalProgram || "",
+      terminalFocusUrl: e.terminalFocusUrl || prev?.terminalFocusUrl || "",
     });
+  }
+
+  /// Late title for a session (jcode resolves it off-thread). Only updates a
+  /// session that still exists, so a slow lookup can't bring an ended one back.
+  setTitle(agent: string, session: string, title: string) {
+    const s = this.sessions.get(`${agent}:${session}`);
+    if (s && title) s.title = title;
   }
 
   remove(session: string) {
     for (const k of [...this.sessions.keys()]) {
       if (k.endsWith(`:${session}`)) this.sessions.delete(k);
+    }
+  }
+
+  /// Attach / clear a pending approval on a session by its id (any agent).
+  setApproval(session: string, approval: { id: string; tool: string; summary: string }) {
+    for (const s of this.sessions.values()) {
+      if (s.session === session) { s.pendingApproval = approval; return; }
+    }
+  }
+  clearApproval(session: string) {
+    for (const s of this.sessions.values()) {
+      if (s.session === session) s.pendingApproval = undefined;
     }
   }
 
@@ -141,6 +169,11 @@ export function agentLabel(kind: string): string {
     case "antigravity": return "Antigravity";
     case "copilot": return "Copilot";
     case "kiro": return "Kiro";
-    default: return "Agent";
+    case "jcode": return "jcode";
+    case "hermes": return "Hermes";
+    case "openclaw": return "OpenClaw";
+    // A custom agent hooked via `--agent <name>`: show its own name, not a
+    // generic label, so distinct customs read distinctly (issue #56).
+    default: return kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : "Agent";
   }
 }

@@ -1,4 +1,66 @@
+import CoreGraphics
 import Foundation
+
+/// Keeps a pet window on-screen across resolution / monitor changes (issue #47).
+public enum PetWindowGeometry {
+    /// Clamps a bottom-left `origin` so a window of `size` sits fully inside the
+    /// screen's `visible` frame. If the window is larger than the visible area on
+    /// an axis, it pins to that axis's minimum edge. Pure (no AppKit) so it's unit
+    /// testable without a display.
+    public static func clampOrigin(_ origin: CGPoint, size: CGSize, into visible: CGRect) -> CGPoint {
+        let maxX = max(visible.minX, visible.maxX - size.width)
+        let maxY = max(visible.minY, visible.maxY - size.height)
+        return CGPoint(x: origin.x.clamped(visible.minX, maxX),
+                       y: origin.y.clamped(visible.minY, maxY))
+    }
+
+    /// Index of the rect closest to `point` (0 when the point is inside it),
+    /// for a pet dropped outside every screen. Nil only when `rects` is empty.
+    public static func nearestRectIndex(to point: CGPoint, in rects: [CGRect]) -> Int? {
+        func distance(_ r: CGRect) -> CGFloat {
+            let dx = max(r.minX - point.x, 0, point.x - r.maxX)
+            let dy = max(r.minY - point.y, 0, point.y - r.maxY)
+            return dx * dx + dy * dy
+        }
+        return rects.indices.min { distance(rects[$0]) < distance(rects[$1]) }
+    }
+
+    /// Horizontal placement for a pet window of `width` whose pet (`petWidth`
+    /// wide) should stay centred at `anchorX`. The window is kept inside
+    /// `[visibleMinX, visibleMaxX]` so a wide bubble never spills onto another
+    /// display; the pet is then shifted inside the window by `petOffset` so it
+    /// doesn't move on screen. The offset is limited so the pet stays inside the
+    /// window (it only moves if the pet itself was dragged past the edge).
+    public static func horizontalLayout(anchorX: CGFloat, width: CGFloat, petWidth: CGFloat,
+                                        visibleMinX: CGFloat, visibleMaxX: CGFloat)
+        -> (originX: CGFloat, petOffset: CGFloat) {
+        let maxOriginX = max(visibleMinX, visibleMaxX - width)
+        let originX = (anchorX - width / 2).clamped(visibleMinX, maxOriginX)
+        let limit = max(0, (width - petWidth) / 2)
+        let offset = (anchorX - (originX + width / 2)).clamped(-limit, limit)
+        return (originX, offset)
+    }
+
+    /// Keeps a pet's speech bubble over the pet when the pet is offset inside
+    /// its window by `petOffset` (see `horizontalLayout`). The bubble moves
+    /// toward the pet as far as the window allows (`windowWidth`, the real
+    /// window, which lags a content resize); the tail covers the rest, kept
+    /// `tailClearance` away from the rounded corners. `bubbleWidth` includes
+    /// `bubbleInset` of padding on each side.
+    public static func bubbleLayout(petOffset: CGFloat, windowWidth: CGFloat, bubbleWidth: CGFloat,
+                                    bubbleInset: CGFloat, tailClearance: CGFloat)
+        -> (bubbleShift: CGFloat, tailShift: CGFloat) {
+        let room = max(0, (windowWidth - bubbleWidth) / 2)
+        let bubbleShift = petOffset.clamped(-room, room)
+        let tailLimit = max(0, (bubbleWidth - 2 * bubbleInset) / 2 - tailClearance)
+        return (bubbleShift, (petOffset - bubbleShift).clamped(-tailLimit, tailLimit))
+    }
+}
+
+extension Comparable {
+    /// `self` limited to `lo...hi` (returns `hi` if `lo > hi`, like `min(max())`).
+    func clamped(_ lo: Self, _ hi: Self) -> Self { min(max(self, lo), hi) }
+}
 
 public struct PetWindowSpec: Equatable, Sendable {
     public var key: String

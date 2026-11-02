@@ -1,5 +1,18 @@
 import Foundation
 
+/// A gated tool call awaiting the user's allow/deny decision.
+public struct PendingApproval: Sendable, Equatable {
+    public let requestId: String
+    public let toolName: String
+    public let summary: String
+
+    public init(requestId: String, toolName: String, summary: String) {
+        self.requestId = requestId
+        self.toolName = toolName
+        self.summary = summary
+    }
+}
+
 /// Current known state of one agent session.
 public struct AgentSession: Identifiable, Sendable, Equatable {
     public let id: String
@@ -20,6 +33,27 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
     public var stateSince: Date
     /// When the session was first created (first `apply` event).
     public var createdAt: Date
+    /// Gated tool call currently awaiting the user's decision, if any.
+    public var pendingApproval: PendingApproval?
+    /// `TERM_PROGRAM` of the terminal running this session. Sticky. Enables the
+    /// click-to-focus affordance on the bubble row.
+    public var terminalProgram: String?
+    /// Controlling TTY of the terminal running this session (e.g.
+    /// `"/dev/ttys003"`). Sticky. Used to target the exact window/tab.
+    public var terminalTTY: String?
+    /// Deep link that focuses the exact tab/pane (Warp). Sticky.
+    public var terminalFocusURL: String?
+    /// Raw agent name for a custom (`.unknown`) agent; `nil` for known kinds.
+    /// Sticky. Keeps distinct custom agents from merging and drives their
+    /// bubble icon (issue #56).
+    public var agentName: String?
+
+    /// Grouping/identity key for the bubble. Known kinds group by kind; custom
+    /// (`.unknown`) agents group by their raw name so two different custom
+    /// agents don't collapse into one row (issue #56).
+    public var groupKey: String {
+        agentKind == .unknown ? "unknown:\(agentName?.lowercased() ?? "")" : agentKind.rawValue
+    }
 
     public init(
         id: String,
@@ -32,7 +66,12 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
         source: AgentSource,
         updatedAt: Date,
         stateSince: Date? = nil,
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        pendingApproval: PendingApproval? = nil,
+        terminalProgram: String? = nil,
+        terminalTTY: String? = nil,
+        terminalFocusURL: String? = nil,
+        agentName: String? = nil
     ) {
         self.id = id
         self.agentKind = agentKind
@@ -45,5 +84,10 @@ public struct AgentSession: Identifiable, Sendable, Equatable {
         self.updatedAt = updatedAt
         self.stateSince = stateSince ?? updatedAt
         self.createdAt = createdAt ?? updatedAt
+        self.pendingApproval = pendingApproval
+        self.terminalProgram = terminalProgram
+        self.terminalTTY = terminalTTY
+        self.terminalFocusURL = terminalFocusURL
+        self.agentName = agentName
     }
 }

@@ -17,6 +17,29 @@ public struct AgentEvent: Codable, Sendable, Equatable {
     public var transcriptPath: String?
     /// Subagent identifier from a `SubagentStop` event (e.g. `"agent-abc123"`).
     public var subagentId: String?
+    /// Non-nil marks this event as a gated `PreToolUse` request: the daemon
+    /// is holding the hook's connection open until the user approves/denies.
+    public var approvalRequestId: String?
+    /// Name of the tool awaiting approval (e.g. `"Bash"`). Set alongside
+    /// `approvalRequestId`.
+    public var toolName: String?
+    /// Human-readable summary of the pending tool call (e.g. the shell
+    /// command), truncated for display. Set alongside `approvalRequestId`.
+    public var toolSummary: String?
+    /// `TERM_PROGRAM` of the terminal the agent runs in (e.g. `"iTerm.app"`,
+    /// `"Apple_Terminal"`, `"WarpTerminal"`). Used to focus that terminal when
+    /// the user clicks the session's bubble row. `nil` outside a terminal.
+    public var terminalProgram: String?
+    /// Controlling TTY device of the terminal (e.g. `"/dev/ttys003"`), used to
+    /// activate the exact window/tab in Terminal.app and iTerm2.
+    public var terminalTTY: String?
+    /// Deep link that focuses the exact tab/pane (Warp's `WARP_FOCUS_URL`). Used
+    /// for terminals that expose a URL scheme instead of AppleScript.
+    public var terminalFocusURL: String?
+    /// Raw `--agent` value when it names an agent AgentPet doesn't recognize.
+    /// Lets distinct custom agents keep their own identity instead of all
+    /// collapsing into one `.unknown` row (issue #56). `nil` for known kinds.
+    public var agentName: String?
     public var timestamp: Date
 
     public init(
@@ -28,6 +51,13 @@ public struct AgentEvent: Codable, Sendable, Equatable {
         model: String? = nil,
         transcriptPath: String? = nil,
         subagentId: String? = nil,
+        approvalRequestId: String? = nil,
+        toolName: String? = nil,
+        toolSummary: String? = nil,
+        terminalProgram: String? = nil,
+        terminalTTY: String? = nil,
+        terminalFocusURL: String? = nil,
+        agentName: String? = nil,
         timestamp: Date
     ) {
         self.sessionId = sessionId
@@ -38,6 +68,13 @@ public struct AgentEvent: Codable, Sendable, Equatable {
         self.model = model
         self.transcriptPath = transcriptPath
         self.subagentId = subagentId
+        self.approvalRequestId = approvalRequestId
+        self.toolName = toolName
+        self.toolSummary = toolSummary
+        self.terminalProgram = terminalProgram
+        self.terminalTTY = terminalTTY
+        self.terminalFocusURL = terminalFocusURL
+        self.agentName = agentName
         self.timestamp = timestamp
     }
 }

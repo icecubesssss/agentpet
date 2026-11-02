@@ -3,15 +3,19 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { exit } from "@tauri-apps/plugin-process";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { loadCatalog, savedSlug, saveSlug, getLibrary, addToLibrary, removeFromLibrary, type Pet, type LibPet } from "./catalog";
+import { loadCatalog, savedSlug, saveSlug, getLibrary, addToLibrary, removeFromLibrary, petDisplayName, renamePet, type Pet, type LibPet } from "./catalog";
 import { t, getLang, setLang, type Lang } from "./i18n";
 import { agentIconUrl, uiIcon } from "./icons";
 import { LAYOUT_PRESETS, readBubbleConfig, type TokenItem, type BubbleToken } from "./bubble";
 import { initDemo } from "./demo";
 import { slice, type Rect } from "./pet";
 import * as care from "./care";
+import * as usage from "./usage";
+import * as projectpets from "./projectpets";
+import * as projectnames from "./projectnames";
 import * as sync from "./sync";
 import * as history from "./history";
+import * as limits from "./limits";
 
 // ------------------------------------------------------------- segmented ----
 // macOS-style segmented controls: <span class="seg" data-key data-default>.
@@ -41,7 +45,7 @@ function initTabs() {
       document.querySelectorAll<HTMLElement>(".page").forEach((p) => {
         p.classList.toggle("sel", p.dataset.page === b.dataset.tab);
       });
-      if (b.dataset.tab === "care") { renderCare(); renderSync(); }
+      if (b.dataset.tab === "care") { renderCare(); renderSync(); void refreshLimits(); }
       if (b.dataset.tab === "history") renderHistory();
     };
   });
@@ -90,6 +94,8 @@ function fmtNum(n: number): string {
 function currentPetName(): string {
   const slug = savedSlug();
   if (!slug) return t("Your pet");
+  const custom = petDisplayName(slug);
+  if (custom !== slug) return custom;
   const hit = getLibrary().find((p) => p.slug === slug) || catalog.find((p) => p.slug === slug);
   return hit?.name || slug;
 }
@@ -117,6 +123,8 @@ function renderCare() {
     .join("");
   setTxt("care-today", fmtNum(s.tokensToday));
   setTxt("care-today-sub", `${s.mealsToday} ${t("sessions")}`);
+  const money = (v: number) => `$${v.toFixed(2)}`;
+  setTxt("care-cost", `${t("Today")} ${money(usage.todayCostUSD())} · ${t("Month")} ${money(usage.monthlyCostUSD())}`);
   setTxt("care-streak", String(s.streakDays));
   setTxt("care-lifetime", fmtNum(s.totalTokens));
   setTxt("care-sessions", String(s.totalMeals));
@@ -128,9 +136,76 @@ function renderCare() {
     .map((d) => `<div class="cbar-wrap" title="${fmtNum(d.tokens)}"><div class="cbar" style="height:${Math.max(3, Math.round((d.tokens / max) * 100))}%"></div><div class="cbar-lbl">${d.label}</div></div>`)
     .join("");
 }
+// Click the pet's name to rename it; Enter or blur saves (empty resets to the
+// default). The custom name flows to the HUD, menubar, and web leaderboard.
+function setupRename() {
+  const nameEl = document.getElementById("care-name");
+  const input = document.getElementById("care-rename") as HTMLInputElement | null;
+  if (!nameEl || !input) return;
+  const startEdit = () => {
+    const slug = savedSlug();
+    if (!slug) return;
+    input.value = currentPetName();
+    nameEl.style.display = "none";
+    input.style.display = "";
+    input.focus();
+    input.select();
+  };
+  const commit = () => {
+    const slug = savedSlug();
+    if (slug) renamePet(slug, input.value);
+    input.style.display = "none";
+    nameEl.style.display = "";
+    renderCare();
+    emit("care-updated");
+    sync.schedulePush();
+  };
+  nameEl.addEventListener("click", startEdit);
+  input.addEventListener("blur", commit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+    else if (e.key === "Escape") { input.value = currentPetName(); input.blur(); }
+  });
+}
+setupRename();
+
+// ---- subscription limits (mac CareTabView "Subscription limits") ----
+function renderLimits(providers: limits.LimitProvider[]) {
+  const list = document.getElementById("limits-list");
+  const sub = document.getElementById("limits-sub");
+  if (!list) return;
+  if (sub) sub.textContent = t(providers.length
+    ? "Read directly from your Claude Code / jcode sign-in."
+    : "Read directly from your Claude Code / jcode sign-in. None found yet.");
+  const escH = (s: string) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+  list.innerHTML = providers.map((p) => {
+    const on = limits.isVisible(p.id);
+    const rows = on ? limits.windowRowsHtml(p, false) : "";
+    return `<div class="limit-prov">
+      <label class="row tight"><span>${escH(t("Show %@ in Limits").replace("%@", p.display_name))}</span>
+        <input type="checkbox" data-limit="${escH(p.id)}" ${on ? "checked" : ""} /></label>
+      ${rows}
+    </div>`;
+  }).join("");
+  list.querySelectorAll<HTMLInputElement>("input[data-limit]").forEach((box) => {
+    box.onchange = () => {
+      limits.setVisible(box.dataset.limit!, box.checked);
+      renderLimits(limits.cached());
+      // Turned back on after being off: the cache may be old or empty.
+      if (box.checked) void limits.refresh().then(renderLimits);
+    };
+  });
+}
+async function refreshLimits() {
+  renderLimits(limits.cached());
+  renderLimits(await limits.refreshIfStale());
+}
+
 // Refresh when the pet window feeds the pet, and periodically for the hunger clock.
 listen("care-updated", () => { if (document.querySelector('.page[data-page="care"].sel')) renderCare(); });
-setInterval(() => { if (document.querySelector('.page[data-page="care"].sel')) renderCare(); }, 30_000);
+setInterval(() => {
+  if (document.querySelector('.page[data-page="care"].sel')) { renderCare(); renderLimits(limits.cached()); }
+}, 30_000);
 
 // ---- web profile / leaderboard sign-in ----
 function renderSync() {
@@ -585,6 +660,7 @@ const MSG_AGENTS: [string, string][] = [
   ["all", "All agents"], ["claude", "Claude Code"], ["codex", "Codex"], ["gemini", "Gemini CLI"],
   ["cursor", "Cursor"], ["opencode", "opencode"], ["windsurf", "Windsurf"],
   ["antigravity", "Antigravity"], ["copilot", "GitHub Copilot"], ["kiro", "Kiro CLI"],
+  ["jcode", "jcode"],
 ];
 
 function initBubble() {
@@ -653,6 +729,89 @@ function initBubble() {
   const idle = document.getElementById("idle") as HTMLInputElement;
   idle.checked = localStorage.getItem("ap_idle") !== "0";
   idle.onchange = () => { localStorage.setItem("ap_idle", idle.checked ? "1" : "0"); changed(); };
+
+  const reactive = document.getElementById("reactive") as HTMLInputElement;
+  reactive.checked = localStorage.getItem("ap_reactive") !== "0";
+  reactive.onchange = () => { localStorage.setItem("ap_reactive", reactive.checked ? "1" : "0"); changed(); };
+
+  const split = document.getElementById("split") as HTMLInputElement;
+  const splitList = document.getElementById("split-list") as HTMLElement;
+  const renderSplitList = () => {
+    splitList.style.display = split.checked ? "" : "none";
+    splitList.innerHTML = "";
+    if (!split.checked) return;
+    const lib = getLibrary();
+    const map = projectpets.projectPetMap();
+    const projects = usage.knownProjects();
+    if (!projects.length) {
+      const p = document.createElement("div");
+      p.className = "cap";
+      p.textContent = t("No projects yet. Use an agent in a project first.");
+      splitList.appendChild(p);
+      return;
+    }
+    for (const proj of projects) {
+      const row = document.createElement("label");
+      row.className = "row";
+      const name = document.createElement("span");
+      name.className = "rt";
+      name.textContent = proj.name;
+      const sel = document.createElement("select");
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = t("Merged");
+      sel.appendChild(none);
+      for (const p of lib) {
+        const o = document.createElement("option");
+        o.value = p.slug;
+        o.textContent = p.name;
+        if (map[proj.id] === p.slug) o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.onchange = () => { projectpets.setProjectPet(proj.id, sel.value); emit("split-changed"); };
+      row.appendChild(name);
+      row.appendChild(sel);
+      splitList.appendChild(row);
+    }
+  };
+  split.checked = projectpets.splitEnabled();
+  split.onchange = () => { projectpets.setSplit(split.checked); renderSplitList(); emit("split-changed"); };
+  renderSplitList();
+  initProjectNames();
+}
+
+// Friendly display names for projects. Saved on change/Enter; empty = folder name.
+function initProjectNames() {
+  const list = document.getElementById("projnames-list") as HTMLElement;
+  list.innerHTML = "";
+  const projects = usage.knownProjects();
+  if (!projects.length) {
+    const p = document.createElement("div");
+    p.className = "row";
+    p.innerHTML = `<span class="cap"></span>`;
+    (p.firstElementChild as HTMLElement).textContent = t("No projects yet. Use an agent in a project first.");
+    list.appendChild(p);
+    return;
+  }
+  for (const proj of projects) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const folder = document.createElement("span");
+    folder.className = "rt";
+    folder.textContent = proj.name;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.autocomplete = "off";
+    input.maxLength = 60;
+    input.placeholder = t("Folder name");
+    input.value = projectnames.customName(proj.id);
+    const save = () => { projectnames.setProjectName(proj.id, input.value); emit("bubble-changed", null); };
+    input.addEventListener("change", save);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { save(); input.blur(); } });
+    row.appendChild(folder);
+    row.appendChild(input);
+    list.appendChild(row);
+  }
 }
 
 // -------------------------------------------------- bubble display + layout ----
@@ -992,6 +1151,8 @@ function playSound(ev: "done" | "waiting") {
   if (data) {
     try { void new Audio(data).play(); return; } catch {}
   }
+  // Same default as the pet window: the native Windows system sound.
+  if (navigator.userAgent.includes("Windows")) { invoke("play_sound", { event: ev }).catch(() => {}); return; }
   try {
     settingsAudioCtx = settingsAudioCtx || new AudioContext();
     const o = settingsAudioCtx.createOscillator();
@@ -1090,6 +1251,8 @@ function applyStatic() {
   set("tab-pet", "Pet");
   set("tab-bubble", "Bubble");
   set("tab-about", "About");
+  set("t-limits-head", "Subscription limits");
+  set("t-limits-help", "Hidden providers stay out of Limits and don't make your pet anxious. Hiding every provider stops the sign-in read and the usage request.");
   // general
   set("t-lang", "Language");
   set("t-lang2", "Language");
@@ -1148,6 +1311,12 @@ function applyStatic() {
   set("o-theme-system", "System");
   set("t-idle", "Show idle message");
   set("t-idle-sub", "The pet's chatter while no agent is running.");
+  set("t-reactive", "Reactive comments");
+  set("t-reactive-sub", "The pet reacts to token usage, streaks, hunger, and busy sessions.");
+  set("t-split", "Split pets by project");
+  set("t-split-sub", "Give a project its own pet window; the rest stay on the main pet.");
+  set("t-projnames", "Project names");
+  set("t-projnames-sub", "Show a friendlier name instead of the folder name in the bubble and notifications. Leave empty to use the folder name.");
   set("t-display", "Display");
   set("t-rows", "Rows");
   set("o-bm-list", "All rows");
@@ -1208,6 +1377,17 @@ function applyStatic() {
   set("t-star", "Star on GitHub");
   set("t-discord", "Join the Discord");
   set("t-coffee", "Buy me a coffee");
+  // onboarding (first-run welcome)
+  set("t-ob-title", "Welcome to AgentPet");
+  set("t-ob-sub", "A desktop pet for your AI coding agents. A few steps to get going.");
+  set("t-ob-s1t", "Pick your pet");
+  set("t-ob-s1d", "Choose a starter pet or import your own.");
+  set("t-ob-s2t", "Connect your agent");
+  set("t-ob-s2d", "Set up Claude, Codex, Cursor and more below.");
+  set("t-ob-s3t", "Turn on notifications");
+  set("t-ob-s3d", "Get alerts when an agent finishes or needs input.");
+  set("t-ob-pet", "Choose a pet");
+  set("t-ob-go", "Get started");
   set("t-author", "Author");
   set("t-version2", "Version");
   // bottom bar + demo panel
@@ -1298,3 +1478,21 @@ initSliders();
 initSegs();
 initMisc();
 initDemo();
+initOnboarding();
+
+// First-run welcome overlay (opened as settings.html?onboarding=1 by the tray /
+// Rust on first launch). Mirrors the macOS OnboardingView: pick a pet, connect
+// an agent, turn on notifications, then Get started. Reuses the real Settings
+// tabs underneath, so the buttons just guide the user there.
+function initOnboarding() {
+  if (new URLSearchParams(location.search).get("onboarding") !== "1") return;
+  const ov = document.getElementById("onboarding");
+  if (!ov) return;
+  ov.hidden = false;
+  const dismiss = () => { ov.hidden = true; };
+  document.getElementById("ob-go")?.addEventListener("click", dismiss);
+  document.getElementById("ob-pet")?.addEventListener("click", () => {
+    (document.querySelector('.tab[data-tab="pet"]') as HTMLButtonElement | null)?.click();
+    dismiss();
+  });
+}

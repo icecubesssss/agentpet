@@ -1,5 +1,9 @@
 pub mod cli;
+pub mod geometry;
 pub mod hooks;
+pub mod jcode;
+pub mod jcode_usage;
+pub mod limits;
 pub mod server;
 pub mod statemap;
 pub mod transcript;
@@ -14,6 +18,7 @@ use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder
 struct TrayItems {
     show_pet: tauri::menu::CheckMenuItem<tauri::Wry>,
     settings: MenuItem<tauri::Wry>,
+    updates: MenuItem<tauri::Wry>,
     quit: MenuItem<tauri::Wry>,
     tray: tauri::tray::TrayIcon<tauri::Wry>,
 }
@@ -105,27 +110,54 @@ fn write_lang(code: &str) {
 }
 
 /// Localised tray labels (the only app text on the Rust side).
-fn tray_labels(code: &str) -> (&'static str, &'static str, &'static str) {
+fn tray_labels(code: &str) -> (&'static str, &'static str, &'static str, &'static str) {
     match code {
-        "vi" => ("Hiện pet", "Cài đặt", "Thoát AgentPet"),
-        "zh" => ("显示宠物", "设置", "退出 AgentPet"),
-        _ => ("Show pet", "Settings", "Quit AgentPet"),
+        "vi" => ("Hiện pet", "Cài đặt", "Kiểm tra cập nhật", "Thoát AgentPet"),
+        "zh" => ("显示宠物", "设置", "检查更新", "退出 AgentPet"),
+        "zh-TW" => ("顯示寵物", "設定", "檢查更新", "結束 AgentPet"),
+        _ => ("Show pet", "Settings", "Check for updates", "Quit AgentPet"),
     }
 }
 
+// These touch config files, jcode's on a `\\wsl.localhost` share, and enabling
+// jcode may run `wsl.exe`. Sync commands run on the main thread and would freeze
+// the UI while WSL boots, so they go to the blocking pool.
 #[tauri::command]
-fn list_agents() -> Vec<hooks::AgentInfo> {
-    hooks::catalog()
+async fn list_agents() -> Vec<hooks::AgentInfo> {
+    tauri::async_runtime::spawn_blocking(hooks::catalog).await.unwrap_or_default()
 }
 
 #[tauri::command]
-fn is_installed(kind: String) -> bool {
-    hooks::is_installed(&kind)
+async fn is_installed(kind: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || hooks::is_installed(&kind)).await.unwrap_or(false)
 }
 
 #[tauri::command]
-fn toggle_install(kind: String) -> Result<bool, String> {
-    hooks::toggle(&kind)
+async fn toggle_install(kind: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || hooks::toggle(&kind))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// True while the left mouse button is held (a drag in progress), so the
+/// off-screen fix waits for the drop instead of fighting the drag.
+fn mouse_down() -> bool {
+    #[cfg(windows)]
+    {
+        #[link(name = "user32")]
+        extern "system" {
+            fn GetAsyncKeyState(vkey: i32) -> i16;
+        }
+        const VK_LBUTTON: i32 = 0x01;
+        // SAFETY: plain Win32 query with no pointers; high bit = currently down.
+        unsafe { (GetAsyncKeyState(VK_LBUTTON) as u16 & 0x8000) != 0 }
+    }
+    #[cfg(not(windows))]
+    {
+        // simplify: no global button query here; the 1 s save cadence
+        // (tick % 33) rarely lands mid-drag. Upgrade: track the drag in JS.
+        false
+    }
 }
 
 /// Window creation MUST NOT run inside a sync command / menu callback on
@@ -151,6 +183,44 @@ fn open_settings_impl(app: tauri::AppHandle) {
             Err(e) => dlog(&format!("open_settings: BUILD FAILED: {e}")),
         }
     });
+}
+
+/// Plays the default done/waiting sound natively (port of the macOS
+/// SoundSettings, which plays the system sounds Glass/Submarine via NSSound).
+/// The toast itself is sent with `<audio silent="true"/>` (winrt-notification's
+/// default when no sound is set), and the old WebAudio fallback was a 0.13 s
+/// beep at gain 0.05, so on Windows "done" was effectively silent. Playing the
+/// .wav by file name also works when the Windows sound scheme is "No Sounds".
+#[tauri::command]
+fn play_sound(event: String) {
+    #[cfg(windows)]
+    {
+        #[link(name = "winmm")]
+        extern "system" {
+            fn PlaySoundW(psz: *const u16, hmod: *mut std::ffi::c_void, flags: u32) -> i32;
+        }
+        const SND_ASYNC: u32 = 0x0001;
+        const SND_NODEFAULT: u32 = 0x0002;
+        const SND_FILENAME: u32 = 0x0002_0000;
+        let file = if event == "waiting" { "Windows Notify Messaging.wav" } else { "Windows Notify System Generic.wav" };
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
+        let path = format!(r"{}\Media\{}", windir, file);
+        let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the call;
+        // SND_ASYNC makes winmm copy what it needs before returning.
+        unsafe { PlaySoundW(wide.as_ptr(), std::ptr::null_mut(), SND_ASYNC | SND_NODEFAULT | SND_FILENAME); }
+    }
+    #[cfg(not(windows))]
+    let _ = event; // Linux build keeps the WebAudio chime (see main.ts)
+}
+
+/// Subscription limits for the Care tab and the pet's "limit low" mood. Only
+/// percentages and reset times cross into the webview, never the token.
+#[tauri::command]
+async fn get_limits() -> Vec<limits::LimitProvider> {
+    // default_paths() only reads a cache (no wsl.exe), so it is cheap; the file
+    // reads themselves run on the blocking pool inside probe_claude.
+    limits::probe_claude(limits::default_paths()).await.into_iter().collect()
 }
 
 #[tauri::command]
@@ -179,16 +249,99 @@ fn open_url(url: String) {
     }
 }
 
+/// Bring the terminal running a session to the front when its bubble row is
+/// clicked. Warp exports a `warp://session/<uuid>` deep link that focuses the
+/// exact pane , the one reliable cross-platform "focus exact tab". Other
+/// terminals have no dependable tab-focus API on Windows/Linux, so we only
+/// best-effort activate the app on macOS (where the Tauri build is dev-only).
+/// A safe `warp://session/<uuid>` deep link: scheme + only URL-safe characters,
+/// so it can never carry shell metacharacters into `cmd /c start`.
+fn is_safe_warp_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("warp://") else { return false };
+    !rest.is_empty()
+        && rest
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-'))
+}
+
+#[tauri::command]
+fn focus_terminal(program: String, focus_url: String) {
+    if is_safe_warp_url(&focus_url) {
+        #[cfg(windows)]
+        { let _ = std::process::Command::new("cmd").args(["/c", "start", "", &focus_url]).spawn(); }
+        #[cfg(target_os = "macos")]
+        { let _ = std::process::Command::new("open").arg(&focus_url).spawn(); }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        { let _ = std::process::Command::new("xdg-open").arg(&focus_url).spawn(); }
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let app = match program.as_str() {
+            "Apple_Terminal" => Some("Terminal"),
+            "iTerm.app" => Some("iTerm"),
+            _ => None,
+        };
+        if let Some(a) = app {
+            let _ = std::process::Command::new("open").args(["-a", a]).spawn();
+        }
+    }
+    let _ = program;
+}
+
+/// Deliver the user's Allow/Deny decision for a gated tool call back to the
+/// parked hook request (see server::handle_approval).
+#[tauri::command]
+fn resolve_approval(id: String, decision: String) {
+    crate::server::resolve_approval(&id, &decision);
+}
+
+/// Split-pet: ensure exactly one extra pet window `pet-<projectId>` exists per
+/// configured project, cloning the main pet's chrome. Each loads `index.html`
+/// with a `?project=<id>` query so its script shows only that project. Closing
+/// happens for any `pet-*` window no longer in the list (merge back). With split
+/// off, the frontend calls this with an empty list, so all extras close.
+#[tauri::command]
+fn sync_project_windows(app: tauri::AppHandle, projects: Vec<String>) {
+    use std::collections::HashSet;
+    let want: HashSet<String> = projects.iter().map(|id| format!("pet-{id}")).collect();
+    for (label, win) in app.webview_windows() {
+        if label.starts_with("pet-") && !want.contains(&label) {
+            let _ = win.close();
+        }
+    }
+    for (i, id) in projects.iter().enumerate() {
+        let label = format!("pet-{id}");
+        if app.get_webview_window(&label).is_some() {
+            continue;
+        }
+        let url = format!("index.html?project={id}");
+        let _ = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+            .title("AgentPet")
+            .inner_size(260.0, 320.0)
+            .position(1200.0 - (i as f64 + 1.0) * 60.0, 600.0)
+            .transparent(true)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .shadow(false)
+            .focused(false)
+            .build();
+    }
+}
+
 /// Persist the chosen language (for the tray on next launch) and re-label the
 /// tray menu items now. Called by the Settings language switcher.
 #[tauri::command]
 fn set_lang(app: tauri::AppHandle, code: String) {
     write_lang(&code);
-    let (p, s, q) = tray_labels(&code);
+    let (p, s, u, q) = tray_labels(&code);
     if let Some(items) = app.try_state::<Mutex<TrayItems>>() {
         if let Ok(it) = items.lock() {
             let _ = it.show_pet.set_text(p);
             let _ = it.settings.set_text(s);
+            let _ = it.updates.set_text(u);
             let _ = it.quit.set_text(q);
         }
     }
@@ -325,13 +478,18 @@ pub fn run() {
             toggle_install,
             open_settings,
             open_url,
+            focus_terminal,
+            resolve_approval,
+            sync_project_windows,
             set_lang,
             set_tray_status,
             set_pet_visible,
             get_pet_visible,
             open_popover,
             log_debug,
-            set_hit_rect
+            set_hit_rect,
+            play_sound,
+            get_limits
         ])
         .setup(|app| {
             server::start(app.handle().clone());
@@ -425,7 +583,31 @@ pub fn run() {
 
                     tick = tick.wrapping_add(1);
                     if tick % 33 == 0 {
-                        if let Ok(p) = win.outer_position() {
+                        if let Ok(mut p) = win.outer_position() {
+                            // A pet dropped past an edge (or outside every
+                            // monitor) comes back onto the nearest work area
+                            // before it is saved there (macOS fix, PR #67).
+                            // Only once the mouse is released, so an ongoing
+                            // drag is never fought.
+                            if !mouse_down() {
+                                if let (Ok(size), Ok(mons)) = (win.outer_size(), win.available_monitors()) {
+                                    let areas: Vec<geometry::Rect> = mons.iter().map(|m| {
+                                        let wa = m.work_area();
+                                        (wa.position.x, wa.position.y, wa.size.width as i32, wa.size.height as i32)
+                                    }).collect();
+                                    let visible = handle
+                                        .try_state::<Mutex<HitRect>>()
+                                        .and_then(|s| s.lock().ok().map(|r| (r.x, r.y, r.w, r.h)))
+                                        .unwrap_or((0.0, 0.0, 0.0, 0.0));
+                                    let fixed = geometry::keep_visible_on_screen((p.x, p.y), (size.width as i32, size.height as i32), visible, &areas);
+                                    if fixed != (p.x, p.y) {
+                                        dlog(&format!("pet off screen at ({},{}) -> ({},{})", p.x, p.y, fixed.0, fixed.1));
+                                        let _ = win.set_position(PhysicalPosition::new(fixed.0, fixed.1));
+                                        p.x = fixed.0;
+                                        p.y = fixed.1;
+                                    }
+                                }
+                            }
                             if last_saved != Some((p.x, p.y)) {
                                 write_pos(p.x, p.y);
                                 last_saved = Some((p.x, p.y));
@@ -438,7 +620,7 @@ pub fn run() {
             // Tray menu , the pet window is frameless, so this is how you reach
             // Settings or quit the app. Labels start in the saved language; the
             // Settings switcher re-labels them live via the `set_lang` command.
-            let (p_lbl, s_lbl, q_lbl) = tray_labels(&read_lang());
+            let (p_lbl, s_lbl, u_lbl, q_lbl) = tray_labels(&read_lang());
             let pet_visible = dirs::config_dir()
                 .map(|d| d.join("AgentPet").join("petvisible"))
                 .and_then(|p| std::fs::read_to_string(p).ok())
@@ -447,8 +629,9 @@ pub fn run() {
             let show_pet_i = tauri::menu::CheckMenuItem::with_id(
                 app, "show_pet", p_lbl, true, pet_visible, None::<&str>)?;
             let settings_i = MenuItem::with_id(app, "settings", s_lbl, true, None::<&str>)?;
+            let updates_i = MenuItem::with_id(app, "check_updates", u_lbl, true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", q_lbl, true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_pet_i, &settings_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&show_pet_i, &settings_i, &updates_i, &quit_i])?;
             let mut tray = TrayIconBuilder::new()
                 .tooltip("AgentPet")
                 .menu(&menu)
@@ -474,6 +657,16 @@ pub fn run() {
                         set_pet_visible(app.clone(), !now_visible);
                     }
                     "settings" => open_settings_impl(app.clone()),
+                    "check_updates" => {
+                        // The updater plugin is driven from JS; the pet window is
+                        // always alive (hidden, never closed) so it receives this
+                        // and runs check()/downloadAndInstall() with notification
+                        // feedback. Gives Linux (appindicator has no tray-click)
+                        // and Windows a reliable Updates entry point.
+                        if let Some(win) = app.get_webview_window("pet") {
+                            let _ = win.emit("check-updates", ());
+                        }
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 });
@@ -484,6 +677,7 @@ pub fn run() {
             app.manage(Mutex::new(TrayItems {
                 show_pet: show_pet_i.clone(),
                 settings: settings_i.clone(),
+                updates: updates_i.clone(),
                 quit: quit_i.clone(),
                 tray,
             }));
@@ -494,12 +688,20 @@ pub fn run() {
             }
 
             dlog("setup complete, tray + loop running");
-            // First run: open Settings so the user knows to pick a pet and
-            // connect an agent (otherwise the pet just sits there silently).
+            // First run: open Settings with the welcome overlay so the user knows
+            // to pick a pet and connect an agent (a port of the macOS onboarding).
             let marker = dirs::config_dir().map(|d| d.join("AgentPet").join(".onboarded"));
             if let Some(m) = marker {
                 if !m.exists() {
-                    open_settings(app.handle().clone());
+                    let h = app.handle().clone();
+                    std::thread::spawn(move || {
+                        let _ = WebviewWindowBuilder::new(
+                            &h, "settings", WebviewUrl::App("settings.html?onboarding=1".into()))
+                            .title("AgentPet")
+                            .inner_size(640.0, 620.0)
+                            .resizable(false)
+                            .build();
+                    });
                     if let Some(parent) = m.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
