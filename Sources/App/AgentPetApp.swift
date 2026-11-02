@@ -56,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         BreakReminderController.shared.start()
         TitroutineReminderController.shared.start()
         FocusBlockController.shared.start()
+        EdgeDrawerWindowController.shared.start()
         SettingsModel.shared.migrateInstalledHooksIfNeeded()
         SettingsModel.shared.repairStaleHookPathsIfNeeded()
         updater = UpdaterController.shared

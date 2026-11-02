@@ -247,6 +247,7 @@ private struct GeneralTab: View {
     @ObservedObject private var breaks = BreakReminderSettings.shared
     @ObservedObject private var titro = TitroutineSettings.shared
     @ObservedObject private var focus = FocusBlockSettings.shared
+    @ObservedObject private var drawerSettings = EdgeDrawerSettings.shared
     // Local mirror of the system login-item state so the toggle re-renders
     // reliably (the SMAppService status isn't observable on its own).
     @State private var launchAtLogin = LoginItem.isEnabled
@@ -488,6 +489,48 @@ private struct GeneralTab: View {
                     }
                     Spacer()
                     Button("Set up") { FocusBlockController.shared.setupBridgeAndRevealExtension() }
+                }
+            }
+
+            Section("Slide-over Drawer (Notes / Tasks / Habits)") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Bật gờ trượt ở cạnh màn hình")
+                        Text("Di chuột vào gờ hoặc nhấn Option + T để mở nhanh bảng Notes/Tasks.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    ColorSwitch(isOn: $drawerSettings.enabled)
+                }
+
+                if drawerSettings.enabled {
+                    Picker("Vị trí cạnh màn hình", selection: $drawerSettings.edgeSide) {
+                        Text("Cạnh phải").tag(DrawerEdgeSide.right)
+                        Text("Cạnh trái").tag(DrawerEdgeSide.left)
+                    }
+
+                    Picker("Cách kích hoạt", selection: $drawerSettings.triggerMode) {
+                        Text("Rê chuột (chờ 160ms)").tag(DrawerTriggerMode.hover)
+                        Text("Click chuột vào gờ").tag(DrawerTriggerMode.click)
+                    }
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Phím tắt nhanh")
+                            Text("Option + T: Đóng/mở bảng | Option + N: Mở thẳng Tab Notes")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Đổi vị trí gờ (độ cao)")
+                            Text("Click giữ vào gờ ở mép màn hình và kéo lên/xuống để đổi vị trí né thanh cuộn.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
                 }
             }
 
