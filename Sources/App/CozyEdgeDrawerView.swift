@@ -95,32 +95,35 @@ struct CozyEdgeDrawerView: View {
 
             // Theme Picker dropdown strip
             if showThemePicker {
-                HStack(spacing: 8) {
-                    ForEach(DrawerThemePreset.allCases) { t in
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                settings.theme = t
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(DrawerThemePreset.allCases) { t in
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    settings.theme = t
+                                }
+                            }) {
+                                HStack(spacing: 4) {
+                                    Text(t.emoji)
+                                        .font(.system(size: 11))
+                                    Text(t.displayName)
+                                        .font(.system(size: 10, weight: settings.theme == t ? .bold : .medium))
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Capsule()
+                                        .fill(settings.theme == t ? t.accentColor.opacity(0.3) : Color.primary.opacity(0.06))
+                                )
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(settings.theme == t ? t.accentColor : Color.clear, lineWidth: 1)
+                                )
                             }
-                        }) {
-                            HStack(spacing: 4) {
-                                Text(t.emoji)
-                                    .font(.system(size: 11))
-                                Text(t.displayName)
-                                    .font(.system(size: 10, weight: settings.theme == t ? .bold : .medium))
-                            }
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 4)
-                            .background(
-                                Capsule()
-                                    .fill(settings.theme == t ? t.accentColor.opacity(0.3) : Color.primary.opacity(0.06))
-                            )
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(settings.theme == t ? t.accentColor : Color.clear, lineWidth: 1)
-                            )
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(.horizontal, 4)
                 }
                 .padding(6)
                 .background(

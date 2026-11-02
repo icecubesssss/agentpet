@@ -57,6 +57,8 @@ enum DrawerThemePreset: String, CaseIterable, Identifiable {
     case matcha = "matcha"       // Matcha Morning (Forest green + Mint glow)
     case lavender = "lavender"   // Lavender Dusk (Deep violet + Lilac glow)
     case latte = "latte"         // Warm Latte (Coffee brown + Caramel gold)
+    case cyberpunk = "cyberpunk" // Neon Cyber (Deep slate navy + Cyan neon)
+    case nord = "nord"           // Nord Frost (Polar night + Glacier blue)
 
     var id: String { rawValue }
 
@@ -67,6 +69,8 @@ enum DrawerThemePreset: String, CaseIterable, Identifiable {
         case .matcha: return "Matcha"
         case .lavender: return "Lavender"
         case .latte: return "Latte"
+        case .cyberpunk: return "Cyber"
+        case .nord: return "Nord"
         }
     }
 
@@ -77,6 +81,8 @@ enum DrawerThemePreset: String, CaseIterable, Identifiable {
         case .matcha: return "🍵"
         case .lavender: return "💜"
         case .latte: return "☕"
+        case .cyberpunk: return "⚡"
+        case .nord: return "❄️"
         }
     }
 
@@ -87,6 +93,8 @@ enum DrawerThemePreset: String, CaseIterable, Identifiable {
         case .matcha: return Color(red: 0.18, green: 0.83, blue: 0.45)
         case .lavender: return Color(red: 0.65, green: 0.37, blue: 0.92)
         case .latte: return Color(red: 1.0, green: 0.65, blue: 0.01)
+        case .cyberpunk: return Color(red: 0.0, green: 0.95, blue: 0.85)
+        case .nord: return Color(red: 0.53, green: 0.75, blue: 0.85)
         }
     }
 
@@ -97,6 +105,8 @@ enum DrawerThemePreset: String, CaseIterable, Identifiable {
         case .matcha: return Color(red: 0.07, green: 0.14, blue: 0.10)
         case .lavender: return Color(red: 0.12, green: 0.08, blue: 0.18)
         case .latte: return Color(red: 0.14, green: 0.10, blue: 0.06)
+        case .cyberpunk: return Color(red: 0.05, green: 0.08, blue: 0.16)
+        case .nord: return Color(red: 0.12, green: 0.15, blue: 0.19)
         }
     }
 
@@ -107,6 +117,8 @@ enum DrawerThemePreset: String, CaseIterable, Identifiable {
         case .matcha: return Color(red: 0.10, green: 0.22, blue: 0.15).opacity(0.35)
         case .lavender: return Color(red: 0.20, green: 0.12, blue: 0.28).opacity(0.35)
         case .latte: return Color(red: 0.22, green: 0.15, blue: 0.10).opacity(0.35)
+        case .cyberpunk: return Color(red: 0.06, green: 0.12, blue: 0.22).opacity(0.4)
+        case .nord: return Color(red: 0.18, green: 0.22, blue: 0.28).opacity(0.35)
         }
     }
 }

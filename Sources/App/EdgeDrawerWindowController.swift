@@ -51,6 +51,7 @@ final class EdgeDrawerWindowController: ObservableObject {
         if drawerPanel == nil {
             let panel = makeDrawerPanel()
             self.drawerPanel = panel
+            repositionDrawer()
         }
     }
 
@@ -83,16 +84,16 @@ final class EdgeDrawerWindowController: ObservableObject {
             .store(in: &cancellables)
     }
 
-    // MARK: - Handle Panel (The Notch)
+    // MARK: - Handle Panel (The Notch Tab)
 
     private func makeHandlePanel() -> NSPanel {
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 8, height: 50),
+            contentRect: NSRect(x: 0, y: 0, width: 18, height: 76),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        panel.level = .floating
+        panel.level = .screenSaver
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
@@ -114,8 +115,8 @@ final class EdgeDrawerWindowController: ObservableObject {
         let visible = screen.visibleFrame
         let settings = EdgeDrawerSettings.shared
 
-        let width: CGFloat = 8
-        let height: CGFloat = 50
+        let width: CGFloat = 18
+        let height: CGFloat = 76
 
         let x: CGFloat = settings.edgeSide == .right ? visible.maxX - width : visible.minX
         let y: CGFloat = visible.minY + (visible.height * settings.verticalRatio) - (height / 2)
@@ -132,7 +133,7 @@ final class EdgeDrawerWindowController: ObservableObject {
             backing: .buffered,
             defer: false
         )
-        panel.level = .floating
+        panel.level = .screenSaver
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
@@ -158,14 +159,14 @@ final class EdgeDrawerWindowController: ObservableObject {
         let settings = EdgeDrawerSettings.shared
 
         let width: CGFloat = 380
-        let height = min(visible.height * 0.8, 650)
+        let height = min(visible.height * 0.85, 680)
         let y = visible.minY + (visible.height - height) / 2
 
         let targetX: CGFloat
         if isOpen {
-            targetX = settings.edgeSide == .right ? visible.maxX - width - 8 : visible.minX + 8
+            targetX = settings.edgeSide == .right ? visible.maxX - width : visible.minX
         } else {
-            targetX = settings.edgeSide == .right ? visible.maxX + 20 : visible.minX - width - 20
+            targetX = settings.edgeSide == .right ? visible.maxX : visible.minX - width
         }
 
         drawerPanel?.setFrame(NSRect(x: targetX, y: y, width: width, height: height), display: true)
@@ -185,60 +186,81 @@ final class EdgeDrawerWindowController: ObservableObject {
         if let tab {
             EdgeDrawerSettings.shared.selectedTab = tab
         }
-        guard !isOpen else {
-            drawerPanel?.makeKeyAndOrderFront(nil)
-            return
-        }
-        isOpen = true
+        closeTimer?.cancel()
+        dwellTimer?.cancel()
 
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let visible = screen.visibleFrame
         let settings = EdgeDrawerSettings.shared
 
         let width: CGFloat = 380
-        let height = min(visible.height * 0.8, 650)
+        let height = min(visible.height * 0.85, 680)
         let y = visible.minY + (visible.height - height) / 2
-        let endX = settings.edgeSide == .right ? visible.maxX - width - 8 : visible.minX + 8
+        let openX = settings.edgeSide == .right ? visible.maxX - width : visible.minX
+        let offscreenX = settings.edgeSide == .right ? visible.maxX : visible.minX - width
 
-        drawerPanel?.setFrame(NSRect(x: endX, y: y, width: width, height: height), display: true)
-        drawerPanel?.alphaValue = 0.0
-        drawerPanel?.makeKeyAndOrderFront(nil)
+        guard let panel = drawerPanel else { return }
+        isOpen = true
+
+        // Ensure app activation for keyboard focus (TextEditor, TextField, shortcuts)
+        NSApp.activate(ignoringOtherApps: true)
 
         if animated {
+            if !panel.isVisible || panel.frame.origin.x == offscreenX {
+                panel.setFrame(NSRect(x: offscreenX, y: y, width: width, height: height), display: false)
+            }
+            panel.alphaValue = 1.0
+            panel.makeKeyAndOrderFront(nil)
+
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.22
                 context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                drawerPanel?.animator().alphaValue = 1.0
-            } completionHandler: { [weak self] in
+                panel.animator().setFrame(NSRect(x: openX, y: y, width: width, height: height), display: true)
+            } completionHandler: {
                 MainActor.assumeIsolated {
-                    self?.drawerPanel?.makeKey()
+                    panel.makeKey()
                 }
             }
         } else {
-            drawerPanel?.alphaValue = 1.0
-            drawerPanel?.makeKey()
+            panel.setFrame(NSRect(x: openX, y: y, width: width, height: height), display: true)
+            panel.alphaValue = 1.0
+            panel.makeKeyAndOrderFront(nil)
+            panel.makeKey()
         }
     }
 
     func closeDrawer(animated: Bool = true) {
         guard isOpen else { return }
+        closeTimer?.cancel()
+        dwellTimer?.cancel()
         isOpen = false
+
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let visible = screen.visibleFrame
+        let settings = EdgeDrawerSettings.shared
+
+        let width: CGFloat = 380
+        let height = drawerPanel?.frame.height ?? min(visible.height * 0.85, 680)
+        let y = drawerPanel?.frame.minY ?? (visible.minY + (visible.height - height) / 2)
+        let offscreenX = settings.edgeSide == .right ? visible.maxX : visible.minX - width
+
+        guard let panel = drawerPanel else { return }
 
         if animated {
             NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.18
+                context.duration = 0.20
                 context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-                drawerPanel?.animator().alphaValue = 0.0
+                panel.animator().setFrame(NSRect(x: offscreenX, y: y, width: width, height: height), display: true)
             }, completionHandler: { [weak self] in
                 MainActor.assumeIsolated {
                     if self?.isOpen == false {
-                        self?.drawerPanel?.orderOut(nil)
+                        panel.orderOut(nil)
                     }
                 }
             })
         } else {
-            drawerPanel?.alphaValue = 0.0
-            drawerPanel?.orderOut(nil)
+            panel.setFrame(NSRect(x: offscreenX, y: y, width: width, height: height), display: true)
+            panel.orderOut(nil)
         }
     }
 
@@ -248,7 +270,7 @@ final class EdgeDrawerWindowController: ObservableObject {
         dwellTimer?.cancel()
 
         dwellTimer = Task {
-            try? await Task.sleep(nanoseconds: 160_000_000)
+            try? await Task.sleep(nanoseconds: 180_000_000)
             guard !Task.isCancelled else { return }
             self.openDrawer(animated: true)
         }
@@ -264,10 +286,19 @@ final class EdgeDrawerWindowController: ObservableObject {
 
     private func drawerMouseExited() {
         guard !EdgeDrawerSettings.shared.isPinned else { return }
+        guard isOpen else { return }
         closeTimer?.cancel()
         closeTimer = Task {
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            try? await Task.sleep(nanoseconds: 600_000_000)
             guard !Task.isCancelled else { return }
+            // Verify cursor is indeed outside before closing
+            let mouseLoc = NSEvent.mouseLocation
+            if let frame = self.drawerPanel?.frame, frame.contains(mouseLoc) {
+                return
+            }
+            if let hFrame = self.handlePanel?.frame, hFrame.contains(mouseLoc) {
+                return
+            }
             self.closeDrawer(animated: true)
         }
     }
@@ -294,14 +325,17 @@ final class EdgeDrawerWindowController: ObservableObject {
 
     private func setupHotkeys() {
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            // Esc closes drawer if open
             if event.keyCode == 53 && self?.isOpen == true {
                 self?.closeDrawer(animated: true)
                 return nil
             }
+            // Option + T (keyCode 17) -> toggle drawer
             if event.modifierFlags.contains(.option) && event.keyCode == 17 {
                 self?.toggleDrawer()
                 return nil
             }
+            // Option + N (keyCode 45) -> open drawer directly to Notes
             if event.modifierFlags.contains(.option) && event.keyCode == 45 {
                 self?.openDrawer(animated: true, tab: .notes)
                 return nil
@@ -326,7 +360,7 @@ final class EdgeDrawerWindowController: ObservableObject {
     }
 }
 
-// MARK: - Handle Notch View
+// MARK: - Handle Notch View (MFinder-style edge tab)
 
 private struct HandleContentView: View {
     var onHoverStart: () -> Void
@@ -336,30 +370,66 @@ private struct HandleContentView: View {
     var onDragUpdate: (CGFloat) -> Void
 
     @State private var isHovered = false
+    @State private var isDragging = false
     @ObservedObject private var settings = EdgeDrawerSettings.shared
 
     var body: some View {
-        Capsule()
-            .fill(isHovered ? settings.theme.accentColor.opacity(0.85) : Color.primary.opacity(0.25))
-            .frame(width: isHovered ? 8 : 5, height: 48)
-            .animation(.easeInOut(duration: 0.15), value: isHovered)
-            .onHover { inside in
-                isHovered = inside
-                if inside {
-                    onHoverStart()
-                } else {
-                    onHoverEnd()
-                }
+        let isRight = settings.edgeSide == .right
+
+        ZStack {
+            // Background Tab
+            RoundedRectangle(cornerRadius: 10)
+                .fill(settings.theme.tintColor.opacity(0.92))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(settings.theme.accentColor.opacity(isHovered ? 0.35 : 0.15))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(settings.theme.accentColor.opacity(isHovered ? 0.85 : 0.4), lineWidth: 1.2)
+                )
+                .shadow(color: settings.theme.accentColor.opacity(isHovered ? 0.45 : 0.2), radius: 6, x: isRight ? -2 : 2, y: 0)
+
+            // Visual Grabber indicator
+            VStack(spacing: 3) {
+                Image(systemName: isRight ? "chevron.left" : "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(settings.theme.accentColor)
+
+                Capsule()
+                    .fill(settings.theme.accentColor.opacity(isHovered ? 0.9 : 0.5))
+                    .frame(width: 3, height: 16)
             }
-            .gesture(
-                DragGesture(minimumDistance: 3, coordinateSpace: .global)
-                    .onChanged { val in
+        }
+        .frame(width: isHovered ? 18 : 14, height: 72)
+        .contentShape(Rectangle())
+        .animation(.easeOut(duration: 0.15), value: isHovered)
+        .onHover { inside in
+            isHovered = inside
+            if inside {
+                onHoverStart()
+            } else {
+                onHoverEnd()
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { val in
+                    if abs(val.translation.height) > 4 {
+                        if !isDragging {
+                            isDragging = true
+                            onDragStart(val.startLocation.y)
+                        }
                         onDragUpdate(val.translation.height)
                     }
-            )
-            .onTapGesture {
-                onClick()
-            }
+                }
+                .onEnded { val in
+                    if !isDragging && abs(val.translation.height) < 5 && abs(val.translation.width) < 5 {
+                        onClick()
+                    }
+                    isDragging = false
+                }
+        )
     }
 }
 
@@ -369,6 +439,8 @@ private final class DrawerHostingView<Content: View>: NSHostingView<Content> {
     var onMouseEntered: () -> Void
     var onMouseExited: () -> Void
     private var trackingArea: NSTrackingArea?
+
+    override var acceptsFirstResponder: Bool { true }
 
     init(rootView: Content, onMouseEntered: @escaping () -> Void, onMouseExited: @escaping () -> Void) {
         self.onMouseEntered = onMouseEntered

@@ -23,6 +23,15 @@ struct QuickNotesView: View {
                 .controlSize(.small)
                 .tint(settings.theme.accentColor)
 
+                Button(action: toggleFirstChecklistLine) {
+                    Label(NSLocalizedString("Xong [x]", comment: ""), systemImage: "checkmark.square")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(settings.theme.accentColor)
+                .help("Đánh dấu hoàn thành mục checklist đầu tiên")
+
                 Button(action: {
                     convertFirstUnfinishedLine()
                 }) {
@@ -93,6 +102,7 @@ struct QuickNotesView: View {
                 TextEditor(text: $store.notesText)
                     .focused($isEditorFocused)
                     .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(Color.primary)
                     .lineSpacing(5)
                     .padding(8)
                     .scrollContentBackground(.hidden)
@@ -107,6 +117,10 @@ struct QuickNotesView: View {
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(settings.theme.accentColor.opacity(0.18), lineWidth: 1)
             )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isEditorFocused = true
+            }
         }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -121,6 +135,18 @@ struct QuickNotesView: View {
         statusTimer = Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             statusMessage = nil
+        }
+    }
+
+    private func toggleFirstChecklistLine() {
+        let lines = store.notesText.components(separatedBy: .newlines)
+        if let index = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).starts(with: "- [ ]") }) {
+            var updated = lines
+            updated[index] = updated[index].replacingOccurrences(of: "- [ ]", with: "- [x]")
+            store.notesText = updated.joined(separator: "\n")
+            showStatus("✓ Đã đánh dấu hoàn thành!")
+        } else {
+            showStatus("Không có mục nào đang chờ")
         }
     }
 
