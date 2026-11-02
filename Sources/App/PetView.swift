@@ -146,7 +146,6 @@ struct FloatingPetView: View {
                 } else if hasTasks {
                     alignedToPet(TaskBubble(rows: model.titroutineRows))
                 }
-                }
             }
             PetView(model: model, size: pet.petPoint)
                 .overlay {
