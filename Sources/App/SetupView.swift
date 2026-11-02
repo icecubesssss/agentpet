@@ -352,6 +352,55 @@ private struct GeneralTab: View {
                             value: $titro.reminderIntervalMinutes, in: 1...240, step: 1)
                         .disabled(!titro.enabled)
                         .opacity(titro.enabled ? 1 : 0.5)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Show habits")
+                            Text("Include incomplete daily/weekly habits in the list.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        ColorSwitch(isOn: $titro.includeHabits)
+                    }
+                    .disabled(!titro.enabled)
+                    .opacity(titro.enabled ? 1 : 0.5)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Show tasks")
+                            Text("Include open to-do and in-progress tasks.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        ColorSwitch(isOn: $titro.includeTasks)
+                    }
+                    .disabled(!titro.enabled)
+                    .opacity(titro.enabled ? 1 : 0.5)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Include pet tasks (Tún)")
+                            Text("Turn off to hide tasks assigned to the pet and only show your own.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        ColorSwitch(isOn: $titro.includePetTasks)
+                    }
+                    .disabled(!titro.enabled || !titro.includeTasks)
+                    .opacity(titro.enabled && titro.includeTasks ? 1 : 0.5)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Only show active focus task")
+                            Text("Hide the list when idle and only display the popover when a task is in-progress.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        ColorSwitch(isOn: $titro.onlyInProgress)
+                    }
+                    .disabled(!titro.enabled)
+                    .opacity(titro.enabled ? 1 : 0.5)
+
                     TextField("Web App URL", text: $titro.webAppURL)
                     HStack {
                         Text("Connected as \(titro.connectedEmail ?? "")")

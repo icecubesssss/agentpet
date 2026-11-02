@@ -47,6 +47,7 @@ final class TitroutineClient: ObservableObject {
 
     private var accessToken: String?
     private var accessTokenExpiry: Date?
+    private var currentUserId: String?
 
     var isConnected: Bool { Keychain.get(Self.refreshTokenAccount) != nil }
 
@@ -68,6 +69,8 @@ final class TitroutineClient: ObservableObject {
         Keychain.set(nil, for: Self.refreshTokenAccount)
         accessToken = nil
         accessTokenExpiry = nil
+        currentUserId = nil
+        UserDefaults.standard.removeObject(forKey: "agentpet.titroutine.currentUserId")
         TitroutineSettings.shared.connectedEmail = nil
     }
 
@@ -90,6 +93,33 @@ final class TitroutineClient: ObservableObject {
     private func store(_ token: TokenResponse) {
         accessToken = token.accessToken
         accessTokenExpiry = Date().addingTimeInterval(TimeInterval(token.expiresIn))
+        if let uid = token.user?.id {
+            currentUserId = uid
+            UserDefaults.standard.set(uid, forKey: "agentpet.titroutine.currentUserId")
+        }
+    }
+
+    private func fetchUserId() async throws -> String {
+        if let currentUserId, !currentUserId.isEmpty {
+            return currentUserId
+        }
+        if let stored = UserDefaults.standard.string(forKey: "agentpet.titroutine.currentUserId"), !stored.isEmpty {
+            currentUserId = stored
+            return stored
+        }
+        let (base, anonKey) = try config()
+        let token = try await validAccessToken()
+        let url = base.appending(path: "auth/v1/user")
+        var req = URLRequest(url: url)
+        req.setValue(anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await URLSession.shared.data(for: req)
+        if let userObj = try? Self.decoder.decode(UserInfo.self, from: data) {
+            currentUserId = userObj.id
+            UserDefaults.standard.set(userObj.id, forKey: "agentpet.titroutine.currentUserId")
+            return userObj.id
+        }
+        throw TitroutineError.auth("Could not determine user ID")
     }
 
     /// Base URL + anon key come from `TitroutineSettings` (user-entered), so no
@@ -133,49 +163,108 @@ final class TitroutineClient: ObservableObject {
     /// Fetch outstanding habits (not completed today), in-progress tasks (with
     /// their start time + focus goal, for the live timer) and to-do tasks.
     func fetchOutstanding() async throws -> Outstanding {
-        let habits: [Row] = try await restGET(
-            table: "habits",
-            query: [.init(name: "select", value: "id,title,frequency"),
-                    .init(name: "archived_at", value: "is.null"),
-                    .init(name: "type", value: "neq.negative")])
-        let doneLogs: [LogRow] = try await restGET(
-            table: "habit_logs",
-            query: [.init(name: "select", value: "habit_id"),
-                    .init(name: "date", value: "eq.\(Self.localToday())"),
-                    .init(name: "is_completed", value: "eq.true")])
-        let active: [ActiveRow] = try await restGET(
-            table: "tasks",
-            query: [.init(name: "select", value: "id,title,updated_at,focus_duration"),
-                    .init(name: "status", value: "eq.in_progress")])
-        let todos: [Row] = try await restGET(
-            table: "tasks",
-            query: [.init(name: "select", value: "id,title"),
-                    .init(name: "status", value: "eq.todo")])
-
-        let doneIDs = Set(doneLogs.map(\.habitId))
-        let jsWeekday = Calendar.current.component(.weekday, from: Date()) - 1
+        let settings = TitroutineSettings.shared
+        let userId = try await fetchUserId()
         var rows: [TitroutineRow] = []
-        // In-progress tasks first — the "running" rows with a live timer.
-        rows += active.map {
-            TitroutineRow(icon: "⏱", title: $0.title,
-                          startedAt: Self.parseDate($0.updatedAt),
-                          targetMinutes: $0.focusDuration)
-        }
-        
-        let filteredHabits = habits.filter { habit in
-            if doneIDs.contains(habit.id) {
-                return false
-            }
-            if let freq = habit.frequency {
-                if freq.type == "specific_days", let days = freq.days {
-                    return days.contains(jsWeekday)
+
+        if settings.onlyInProgress {
+            let active: [ActiveRow] = try await restGET(
+                table: "tasks",
+                query: [.init(name: "user_id", value: "eq.\(userId)"),
+                        .init(name: "select", value: "id,title,updated_at,focus_duration,assignee_type,deadline"),
+                        .init(name: "status", value: "eq.in_progress")])
+            let filteredActive = active.filter { row in
+                if !settings.includePetTasks && row.assigneeType == "pet" {
+                    return false
                 }
+                return true
             }
-            return true
+            rows += filteredActive.map {
+                TitroutineRow(icon: "⏱", title: $0.title,
+                              startedAt: Self.parseDate($0.updatedAt),
+                              targetMinutes: $0.focusDuration)
+            }
+            return Outstanding(rows: rows)
         }
-        
-        rows += filteredHabits.map { TitroutineRow(icon: "🔁", title: $0.title) }
-        rows += todos.map { TitroutineRow(icon: "📋", title: $0.title) }
+
+        if settings.includeTasks {
+            let active: [ActiveRow] = try await restGET(
+                table: "tasks",
+                query: [.init(name: "user_id", value: "eq.\(userId)"),
+                        .init(name: "select", value: "id,title,updated_at,focus_duration,assignee_type,deadline"),
+                        .init(name: "status", value: "eq.in_progress")])
+            let todos: [TaskRow] = try await restGET(
+                table: "tasks",
+                query: [.init(name: "user_id", value: "eq.\(userId)"),
+                        .init(name: "select", value: "id,title,assignee_type,deadline"),
+                        .init(name: "status", value: "eq.todo")])
+
+            let todayStr = Self.localToday()
+
+            let filteredActive = active.filter { row in
+                if !settings.includePetTasks && row.assigneeType == "pet" {
+                    return false
+                }
+                if let dl = row.deadline, dl.prefix(10) < todayStr {
+                    return false
+                }
+                return true
+            }
+            let filteredTodos = todos.filter { row in
+                if !settings.includePetTasks && row.assigneeType == "pet" {
+                    return false
+                }
+                if let dl = row.deadline, dl.prefix(10) < todayStr {
+                    return false
+                }
+                return true
+            }
+
+            rows += filteredActive.map {
+                TitroutineRow(icon: "⏱", title: $0.title,
+                              startedAt: Self.parseDate($0.updatedAt),
+                              targetMinutes: $0.focusDuration)
+            }
+            rows += filteredTodos.map { TitroutineRow(icon: "📋", title: $0.title) }
+        }
+
+        if settings.includeHabits {
+            let habits: [Row] = try await restGET(
+                table: "habits",
+                query: [.init(name: "user_id", value: "eq.\(userId)"),
+                        .init(name: "select", value: "id,title,frequency"),
+                        .init(name: "archived_at", value: "is.null"),
+                        .init(name: "type", value: "neq.negative")])
+            // Today's logs, then keep the ones that are done *or* marked failed
+            // on the web app — both drop off the list. `select=*` (not a column
+            // list / an is_failed filter) so this still works on a database
+            // without migration 14's `is_failed` column.
+            let todayLogs: [LogRow] = try await restGET(
+                table: "habit_logs",
+                query: [.init(name: "user_id", value: "eq.\(userId)"),
+                        .init(name: "select", value: "*"),
+                        .init(name: "date", value: "eq.\(Self.localToday())")])
+
+            let doneIDs = Set(todayLogs
+                .filter { $0.isCompleted == true || $0.isFailed == true }
+                .map(\.habitId))
+            let jsWeekday = Calendar.current.component(.weekday, from: Date()) - 1
+
+            let filteredHabits = habits.filter { habit in
+                if doneIDs.contains(habit.id) {
+                    return false
+                }
+                if let freq = habit.frequency {
+                    if freq.type == "specific_days", let days = freq.days {
+                        return days.contains(jsWeekday)
+                    }
+                }
+                return true
+            }
+
+            rows += filteredHabits.map { TitroutineRow(icon: "🔁", title: $0.title) }
+        }
+
         return Outstanding(rows: rows)
     }
 
@@ -204,10 +293,15 @@ final class TitroutineClient: ObservableObject {
 
     // MARK: - Wire types
 
+    private struct UserInfo: Decodable {
+        let id: String
+        let email: String?
+    }
     private struct TokenResponse: Decodable {
         let accessToken: String
         let refreshToken: String
         let expiresIn: Int
+        let user: UserInfo?
     }
     private struct HabitFrequency: Decodable {
         let type: String
@@ -218,12 +312,24 @@ final class TitroutineClient: ObservableObject {
         let title: String
         let frequency: HabitFrequency?
     }
-    private struct LogRow: Decodable { let habitId: String }
+    private struct TaskRow: Decodable {
+        let id: String
+        let title: String
+        let assigneeType: String?
+        let deadline: String?
+    }
+    private struct LogRow: Decodable {
+        let habitId: String
+        let isCompleted: Bool?
+        let isFailed: Bool?
+    }
     private struct ActiveRow: Decodable {
         let id: String
         let title: String
         let updatedAt: String      // ISO8601; used as the "started" mark
         let focusDuration: Int
+        let assigneeType: String?
+        let deadline: String?
     }
 
     private static let decoder: JSONDecoder = {
@@ -238,6 +344,15 @@ final class TitroutineClient: ObservableObject {
         f.timeZone = TimeZone.current
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: Date())
+    }
+
+    private static func localYesterday() -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar.current
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+        return f.string(from: yesterday)
     }
 
     /// Parse a Postgres timestamptz (with or without fractional seconds).

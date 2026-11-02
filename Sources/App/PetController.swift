@@ -525,9 +525,13 @@ final class PetController: ObservableObject {
         // Show the Titroutine list on the home pet — alongside any live agent
         // rows, so task reminders and agent monitoring run in parallel.
         let showTasks = spec.key == PetWindowPlanner.defaultKey
+        var resolvedMood = spec.mood
+        if showTasks && titroutineRows.contains(where: { $0.startedAt != nil }) {
+            resolvedMood = .working
+        }
         return PetWindowController.WindowState(
             petID: petID,
-            mood: spec.mood,
+            mood: resolvedMood,
             sessions: groupSessions,
             count: lineCount,
             chatLine: resolvedLine,

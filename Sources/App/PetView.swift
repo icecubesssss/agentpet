@@ -35,7 +35,37 @@ struct PetView: View {
 
     @ViewBuilder private var content: some View {
         if let id = model.petID, let pack = imagePets.pack(id: id) {
-            let clip = bindings.clipIndex(packId: pack.id, clipCount: pack.clipCount, mood: model.mood)
+            let clip: Int = {
+                if pack.id == "pandagirl" {
+                    switch model.mood {
+                    case .idle: return 0
+                    case .working:
+                        var style = 1
+                        if let activeRow = model.titroutineRows.first(where: { $0.startedAt != nil }) {
+                            let titleLower = activeRow.title.lowercased()
+                            if titleLower.contains("viết") || titleLower.contains("write") || titleLower.contains("note") || titleLower.contains("ghi") || titleLower.contains("nhật ký") || titleLower.contains("diary") {
+                                style = 8
+                            } else if titleLower.contains("đọc") || titleLower.contains("read") || titleLower.contains("book") || titleLower.contains("sách") || titleLower.contains("học") || titleLower.contains("study") || titleLower.contains("learn") {
+                                style = 2
+                            }
+                        } else if let activeSession = model.sessions.first(where: { $0.state == .working }) {
+                            let text = ((activeSession.title ?? "") + " " + (activeSession.project ?? "")).lowercased()
+                            if text.contains("write") || text.contains("note") || text.contains("diary") || text.contains("viết") || text.contains("nhật ký") {
+                                style = 8
+                            } else if text.contains("read") || text.contains("book") || text.contains("study") || text.contains("learn") || text.contains("đọc") || text.contains("sách") || text.contains("học") {
+                                style = 2
+                            }
+                        }
+                        return min(style, pack.clipCount - 1)
+                    case .waiting: return min(6, pack.clipCount - 1)
+                    case .done: return min(3, pack.clipCount - 1)
+                    case .celebrate: return min(4, pack.clipCount - 1)
+                    case .sleepy: return min(5, pack.clipCount - 1)
+                    case .levelup: return min(7, pack.clipCount - 1)
+                    }
+                }
+                return bindings.clipIndex(packId: pack.id, clipCount: pack.clipCount, mood: model.mood)
+            }()
             ImageSpriteView(frames: pack.clip(clip), mood: model.mood,
                             fps: pet.spriteFPS(forMood: model.mood), size: size)
         } else {
@@ -163,6 +193,10 @@ struct AgentBubble: View {
     var rows: [TitroutineRow] = []
     var tailEdge: Edge = .bottom
     @ObservedObject private var settings = BubbleSettings.shared
+    @ObservedObject private var titro = TitroutineSettings.shared
+
+    /// Task list maximized: every task row, agent rows folded into one hint line.
+    private var tasksMaximized: Bool { titro.tasksExpanded && !rows.isEmpty }
 
     // attentionPriority is internal to AgentPetCore — use local rank
     private func rank(_ s: AgentState) -> Int {
@@ -292,20 +326,29 @@ struct AgentBubble: View {
 
     @ViewBuilder
     private var bubbleContent: some View {
-        switch settings.displayMode {
-        case .list:
-            ForEach(groupedSessions) { group in
-                AgentRow(session: group.session, count: group.count, chatStyle: isPetChat)
+        if tasksMaximized {
+            // Agents are still tracked, just folded away while the list is big.
+            if totalSessionCount > 0 {
+                Text("🤖 \(totalSessionCount) agent đang ẩn")
+                    .font(.system(size: settings.fontSize.secondaryPt, weight: .regular))
+                    .foregroundStyle(textColor(0.5))
             }
-        case .carousel:
-            BubbleCarousel(groups: groupedSessions, chatStyle: isPetChat)
-        case .compact:
-            BubbleCompactLayout(
-                groups: groupedSessions,
-                totalCount: totalSessionCount,
-                chatStyle: isPetChat,
-                textColor: textColor
-            )
+        } else {
+            switch settings.displayMode {
+            case .list:
+                ForEach(groupedSessions) { group in
+                    AgentRow(session: group.session, count: group.count, chatStyle: isPetChat)
+                }
+            case .carousel:
+                BubbleCarousel(groups: groupedSessions, chatStyle: isPetChat)
+            case .compact:
+                BubbleCompactLayout(
+                    groups: groupedSessions,
+                    totalCount: totalSessionCount,
+                    chatStyle: isPetChat,
+                    textColor: textColor
+                )
+            }
         }
         // Titroutine reminder rows, in the same bubble below the agent rows.
         if !rows.isEmpty {
@@ -314,17 +357,18 @@ struct AgentBubble: View {
                     .frame(height: 1)
                     .padding(.vertical, 1)
             }
-            Text("🐰 Còn \(rows.count) việc chưa xong nè!")
-                .font(.system(size: settings.fontSize.primaryPt, weight: .semibold))
-                .foregroundStyle(textColor(0.85))
-            ForEach(Array(rows.prefix(6).enumerated()), id: \.offset) { _, row in
+            let limit = TitroutineRowView.visibleLimit(expanded: tasksMaximized)
+            TaskListHeader(count: rows.count,
+                           fontPt: settings.fontSize.primaryPt,
+                           color: textColor(0.85))
+            ForEach(Array(rows.prefix(limit).enumerated()), id: \.offset) { _, row in
                 TitroutineRowView(row: row,
-                                  fontPt: settings.fontSize.secondaryPt,
+                                  fontPt: tasksMaximized ? settings.fontSize.primaryPt : settings.fontSize.secondaryPt,
                                   color: textColor(0.8),
                                   dim: textColor(0.5))
             }
-            if rows.count > 6 {
-                Text("… và \(rows.count - 6) việc nữa")
+            if rows.count > limit {
+                Text("… và \(rows.count - limit) việc nữa")
                     .font(.system(size: settings.fontSize.secondaryPt, weight: .regular))
                     .foregroundStyle(textColor(0.5))
             }
@@ -978,11 +1022,48 @@ struct TitroutineRowView: View {
         let s = Int(t)
         return String(format: "%d:%02d", s / 60, s % 60)
     }
+
+    /// Rows shown before "… và N việc nữa". Maximized still caps so a huge
+    /// backlog can't grow the floating window off-screen.
+    static func visibleLimit(expanded: Bool) -> Int { expanded ? 20 : 6 }
+}
+
+/// "🐰 Còn N việc…" title with the maximize / minimize toggle. The choice is
+/// persisted in `TitroutineSettings.tasksExpanded`, so it sticks across bubble
+/// switches and relaunches.
+struct TaskListHeader: View {
+    let count: Int
+    let fontPt: CGFloat
+    let color: Color
+    @ObservedObject private var titro = TitroutineSettings.shared
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("🐰 Còn \(count) việc chưa xong nè!")
+                .font(.system(size: fontPt, weight: .semibold))
+                .foregroundStyle(color)
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) { titro.tasksExpanded.toggle() }
+            }) {
+                Image(systemName: titro.tasksExpanded
+                      ? "arrow.down.right.and.arrow.up.left"
+                      : "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: max(9, fontPt - 2), weight: .bold))
+                    .foregroundStyle(color.opacity(0.6))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .noFocusRing()
+            .help(titro.tasksExpanded ? "Thu nhỏ danh sách việc" : "Phóng to danh sách việc")
+        }
+    }
 }
 
 struct TaskBubble: View {
     let rows: [TitroutineRow]
     @ObservedObject private var settings = BubbleSettings.shared
+    @ObservedObject private var titro = TitroutineSettings.shared
 
     private var fill: Color {
         switch settings.theme {
@@ -1007,15 +1088,16 @@ struct TaskBubble: View {
     }
 
     var body: some View {
-        let shown = Array(rows.prefix(6))
+        let expanded = titro.tasksExpanded
+        let shown = Array(rows.prefix(TitroutineRowView.visibleLimit(expanded: expanded)))
         let extra = rows.count - shown.count
         VStack(alignment: .leading, spacing: 3) {
-            Text("🐰 Còn \(rows.count) việc chưa xong nè!")
-                .font(.system(size: settings.fontSize.primaryPt, weight: .semibold))
-                .foregroundStyle(textColor)
+            TaskListHeader(count: rows.count,
+                           fontPt: settings.fontSize.primaryPt,
+                           color: textColor)
             ForEach(Array(shown.enumerated()), id: \.offset) { _, row in
                 TitroutineRowView(row: row,
-                                  fontPt: settings.fontSize.secondaryPt,
+                                  fontPt: expanded ? settings.fontSize.primaryPt : settings.fontSize.secondaryPt,
                                   color: textColor.opacity(0.9),
                                   dim: textColor.opacity(0.5))
             }
@@ -1027,7 +1109,7 @@ struct TaskBubble: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .frame(maxWidth: 240, alignment: .leading)
+        .frame(maxWidth: expanded ? 380 : 240, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(fill))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(borderColor, lineWidth: 1))
     }

@@ -15,6 +15,23 @@ final class TitroutineSettings: ObservableObject {
     @Published var reminderIntervalMinutes: Int {
         didSet { UserDefaults.standard.set(reminderIntervalMinutes, forKey: Self.intervalKey); onChange?() }
     }
+    @Published var includeHabits: Bool {
+        didSet { UserDefaults.standard.set(includeHabits, forKey: Self.includeHabitsKey); onChange?() }
+    }
+    @Published var includeTasks: Bool {
+        didSet { UserDefaults.standard.set(includeTasks, forKey: Self.includeTasksKey); onChange?() }
+    }
+    @Published var includePetTasks: Bool {
+        didSet { UserDefaults.standard.set(includePetTasks, forKey: Self.includePetTasksKey); onChange?() }
+    }
+    @Published var onlyInProgress: Bool {
+        didSet { UserDefaults.standard.set(onlyInProgress, forKey: Self.onlyInProgressKey); onChange?() }
+    }
+    /// Task list in the pet bubble is maximized (all rows, agent rows hidden).
+    /// UI-only, so it skips `onChange` — flipping it must not re-fetch.
+    @Published var tasksExpanded: Bool {
+        didSet { UserDefaults.standard.set(tasksExpanded, forKey: Self.tasksExpandedKey) }
+    }
     /// Email of the linked Titroutine account (nil = not connected). Display only.
     @Published var connectedEmail: String? {
         didSet {
@@ -54,6 +71,11 @@ final class TitroutineSettings: ObservableObject {
 
     private static let enabledKey = "agentpet.titroutine.enabled"
     private static let intervalKey = "agentpet.titroutine.reminderIntervalMinutes"
+    private static let includeHabitsKey = "agentpet.titroutine.includeHabits"
+    private static let includeTasksKey = "agentpet.titroutine.includeTasks"
+    private static let includePetTasksKey = "agentpet.titroutine.includePetTasks"
+    private static let onlyInProgressKey = "agentpet.titroutine.onlyInProgress"
+    private static let tasksExpandedKey = "agentpet.titroutine.tasksExpanded"
     private static let emailKey = "agentpet.titroutine.connectedEmail"
     private static let urlKey = "agentpet.titroutine.supabaseURL"
     private static let anonKey_ = "agentpet.titroutine.anonKey"
@@ -63,6 +85,11 @@ final class TitroutineSettings: ObservableObject {
         let d = UserDefaults.standard
         enabled = (d.object(forKey: Self.enabledKey) as? Bool) ?? false
         reminderIntervalMinutes = (d.object(forKey: Self.intervalKey) as? Int) ?? 60
+        includeHabits = (d.object(forKey: Self.includeHabitsKey) as? Bool) ?? true
+        includeTasks = (d.object(forKey: Self.includeTasksKey) as? Bool) ?? true
+        includePetTasks = (d.object(forKey: Self.includePetTasksKey) as? Bool) ?? false
+        onlyInProgress = (d.object(forKey: Self.onlyInProgressKey) as? Bool) ?? false
+        tasksExpanded = (d.object(forKey: Self.tasksExpandedKey) as? Bool) ?? false
         connectedEmail = d.string(forKey: Self.emailKey)
         supabaseURL = d.string(forKey: Self.urlKey) ?? ""
         anonKey = d.string(forKey: Self.anonKey_) ?? ""
