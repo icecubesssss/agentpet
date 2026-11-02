@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct DrawerHabitsView: View {
+    @ObservedObject private var settings = EdgeDrawerSettings.shared
+
     @State private var habits: [DrawerHabitItem] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -27,7 +29,7 @@ struct DrawerHabitsView: View {
                 HStack {
                     Text("HÔM NAY: \(completedCount)/\(habits.count) HOÀN THÀNH")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(settings.theme.accentColor.opacity(0.85))
                     Spacer()
                 }
                 .padding(.top, 4)
@@ -53,8 +55,8 @@ struct DrawerHabitsView: View {
                 toggleHabit(habit)
             }) {
                 Image(systemName: habit.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 17))
-                    .foregroundStyle(habit.isCompleted ? .mint : .secondary)
+                    .font(.system(size: 18))
+                    .foregroundStyle(habit.isCompleted ? settings.theme.accentColor : .secondary)
             }
             .buttonStyle(.plain)
 
@@ -76,7 +78,7 @@ struct DrawerHabitsView: View {
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(habit.isCompleted ? Color.mint.opacity(0.06) : Color.primary.opacity(0.03))
+                .fill(habit.isCompleted ? settings.theme.accentColor.opacity(0.12) : settings.theme.cardBackground)
         )
     }
 
@@ -123,4 +125,3 @@ struct DrawerHabitsView: View {
         }
     }
 }
-

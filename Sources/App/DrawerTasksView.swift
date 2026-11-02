@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct DrawerTasksView: View {
+    @ObservedObject private var settings = EdgeDrawerSettings.shared
+
     @State private var tasks: [DrawerTaskItem] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -23,7 +25,7 @@ struct DrawerTasksView: View {
                         .padding(.vertical, 6)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(nsColor: .textBackgroundColor).opacity(0.4))
+                                .fill(settings.theme.cardBackground)
                         )
                         .onSubmit {
                             submitTask()
@@ -36,8 +38,8 @@ struct DrawerTasksView: View {
                     } else {
                         Button(action: submitTask) {
                             Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 16))
-                                .foregroundStyle(newTitle.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary : Color.accentColor)
+                                .font(.system(size: 18))
+                                .foregroundStyle(newTitle.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary : settings.theme.accentColor)
                         }
                         .buttonStyle(.plain)
                         .disabled(newTitle.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -63,6 +65,7 @@ struct DrawerTasksView: View {
                     } label: {
                         Text("⏱ \(focusDuration)m")
                             .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(settings.theme.accentColor)
                     }
                     .menuStyle(.borderlessButton)
                     .frame(width: 60)
@@ -72,8 +75,12 @@ struct DrawerTasksView: View {
             }
             .padding(8)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.primary.opacity(0.04))
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(settings.theme.cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(settings.theme.accentColor.opacity(0.15), lineWidth: 1)
             )
 
             if let errorMessage {
@@ -104,7 +111,7 @@ struct DrawerTasksView: View {
                         // In Progress
                         let inProgress = tasks.filter { $0.status == "in_progress" }
                         if !inProgress.isEmpty {
-                            sectionHeader(title: "ĐANG THỰC HIỆN", count: inProgress.count, color: .orange)
+                            sectionHeader(title: "ĐANG THỰC HIỆN", count: inProgress.count, color: settings.theme.accentColor)
                             ForEach(inProgress) { task in
                                 taskRow(task: task)
                             }
@@ -141,7 +148,7 @@ struct DrawerTasksView: View {
         HStack {
             Text("\(title) (\(count))")
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(color.opacity(0.8))
+                .foregroundStyle(color.opacity(0.85))
             Spacer()
         }
         .padding(.top, 4)
@@ -154,8 +161,8 @@ struct DrawerTasksView: View {
                 toggleTaskDone(task)
             }) {
                 Image(systemName: task.status == "done" ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 15))
-                    .foregroundStyle(task.status == "done" ? .green : .secondary)
+                    .font(.system(size: 16))
+                    .foregroundStyle(task.status == "done" ? settings.theme.accentColor : .secondary)
             }
             .buttonStyle(.plain)
 
@@ -178,7 +185,7 @@ struct DrawerTasksView: View {
                     if task.status == "in_progress", task.startedAt != nil {
                         Text("• đang chạy")
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(settings.theme.accentColor)
                     }
                 }
             }
@@ -192,10 +199,10 @@ struct DrawerTasksView: View {
                 }) {
                     Text("Bắt đầu")
                         .font(.system(size: 10, weight: .medium))
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.orange.opacity(0.2)))
-                        .foregroundStyle(.orange)
+                        .background(Capsule().fill(settings.theme.accentColor.opacity(0.2)))
+                        .foregroundStyle(settings.theme.accentColor)
                 }
                 .buttonStyle(.plain)
             } else if task.status == "in_progress" {
@@ -204,7 +211,7 @@ struct DrawerTasksView: View {
                 }) {
                     Text("Tạm dừng")
                         .font(.system(size: 10, weight: .medium))
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(Capsule().fill(Color.secondary.opacity(0.2)))
                         .foregroundStyle(.secondary)
@@ -224,7 +231,7 @@ struct DrawerTasksView: View {
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(task.status == "in_progress" ? Color.orange.opacity(0.08) : Color.primary.opacity(0.03))
+                .fill(task.status == "in_progress" ? settings.theme.accentColor.opacity(0.12) : settings.theme.cardBackground)
         )
     }
 
@@ -277,7 +284,6 @@ struct DrawerTasksView: View {
                     tasks[idx].status = nextStatus
                     if nextStatus == "in_progress" {
                         tasks[idx].startedAt = Date()
-                        // change any other in_progress to todo
                         for i in tasks.indices where tasks[i].id != task.id && tasks[i].status == "in_progress" {
                             tasks[i].status = "todo"
                             tasks[i].startedAt = nil

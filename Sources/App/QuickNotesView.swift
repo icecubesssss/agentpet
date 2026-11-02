@@ -2,6 +2,9 @@ import SwiftUI
 
 struct QuickNotesView: View {
     @ObservedObject private var store = QuickNotesStore.shared
+    @ObservedObject private var settings = EdgeDrawerSettings.shared
+    @FocusState private var isEditorFocused: Bool
+
     @State private var statusMessage: String?
     @State private var statusTimer: Task<Void, Never>?
 
@@ -11,12 +14,14 @@ struct QuickNotesView: View {
             HStack(spacing: 6) {
                 Button(action: {
                     store.addChecklistItem()
+                    isEditorFocused = true
                 }) {
-                    Label(NSLocalizedString("Checklist", comment: ""), systemImage: "checkmark.circle")
+                    Label(NSLocalizedString("+ Checklist", comment: ""), systemImage: "checkmark.circle.fill")
                         .font(.system(size: 11, weight: .medium))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .tint(settings.theme.accentColor)
 
                 Button(action: {
                     convertFirstUnfinishedLine()
@@ -26,6 +31,7 @@ struct QuickNotesView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .tint(settings.theme.accentColor)
                 .help("Chuyển dòng checklist chưa hoàn thành đầu tiên thành Task Titroutine")
 
                 Spacer()
@@ -36,8 +42,8 @@ struct QuickNotesView: View {
                         .frame(width: 14, height: 14)
                 } else if store.lastSyncedAt != nil {
                     Image(systemName: "cloud.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(settings.theme.accentColor.opacity(0.8))
                         .help("Đã đồng bộ lên cloud")
                 }
 
@@ -56,6 +62,7 @@ struct QuickNotesView: View {
                 Button(action: {
                     store.notesText = ""
                     showStatus("Đã xóa sạch!")
+                    isEditorFocused = true
                 }) {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
@@ -68,24 +75,43 @@ struct QuickNotesView: View {
 
             if let statusMessage {
                 Text(statusMessage)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.mint)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(settings.theme.accentColor)
                     .transition(.opacity)
             }
 
             // Note editor
-            TextEditor(text: $store.notesText)
-                .font(.system(size: 13, design: .monospaced))
-                .lineSpacing(4)
-                .padding(8)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(nsColor: .textBackgroundColor).opacity(0.4))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                )
+            ZStack(alignment: .topLeading) {
+                if store.notesText.isEmpty {
+                    Text("Gõ ghi chú hoặc checklist tại đây...\n- [ ] Việc cần làm 1\n- [ ] Việc cần làm 2")
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .padding(12)
+                        .allowsHitTesting(false)
+                }
+
+                TextEditor(text: $store.notesText)
+                    .focused($isEditorFocused)
+                    .font(.system(size: 13, design: .monospaced))
+                    .lineSpacing(5)
+                    .padding(8)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(settings.theme.cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(settings.theme.accentColor.opacity(0.18), lineWidth: 1)
+            )
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isEditorFocused = true
+            }
         }
     }
 
@@ -125,4 +151,3 @@ struct QuickNotesView: View {
         }
     }
 }
-

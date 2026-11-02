@@ -51,6 +51,66 @@ enum DrawerTab: String, CaseIterable, Identifiable {
     }
 }
 
+enum DrawerThemePreset: String, CaseIterable, Identifiable {
+    case midnight = "midnight"   // Cozy Midnight Dark (Deep obsidian + Amber glow)
+    case sakura = "sakura"       // Sakura Blossom (Rosy dusk + Peach Pink glow)
+    case matcha = "matcha"       // Matcha Morning (Forest green + Mint glow)
+    case lavender = "lavender"   // Lavender Dusk (Deep violet + Lilac glow)
+    case latte = "latte"         // Warm Latte (Coffee brown + Caramel gold)
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .midnight: return "Midnight"
+        case .sakura: return "Sakura"
+        case .matcha: return "Matcha"
+        case .lavender: return "Lavender"
+        case .latte: return "Latte"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .midnight: return "🌙"
+        case .sakura: return "🌸"
+        case .matcha: return "🍵"
+        case .lavender: return "💜"
+        case .latte: return "☕"
+        }
+    }
+
+    var accentColor: Color {
+        switch self {
+        case .midnight: return Color(red: 1.0, green: 0.62, blue: 0.26)
+        case .sakura: return Color(red: 1.0, green: 0.46, blue: 0.60)
+        case .matcha: return Color(red: 0.18, green: 0.83, blue: 0.45)
+        case .lavender: return Color(red: 0.65, green: 0.37, blue: 0.92)
+        case .latte: return Color(red: 1.0, green: 0.65, blue: 0.01)
+        }
+    }
+
+    var tintColor: Color {
+        switch self {
+        case .midnight: return Color(red: 0.08, green: 0.10, blue: 0.15)
+        case .sakura: return Color(red: 0.15, green: 0.08, blue: 0.12)
+        case .matcha: return Color(red: 0.07, green: 0.14, blue: 0.10)
+        case .lavender: return Color(red: 0.12, green: 0.08, blue: 0.18)
+        case .latte: return Color(red: 0.14, green: 0.10, blue: 0.06)
+        }
+    }
+
+    var cardBackground: Color {
+        switch self {
+        case .midnight: return Color.black.opacity(0.3)
+        case .sakura: return Color(red: 0.25, green: 0.12, blue: 0.18).opacity(0.35)
+        case .matcha: return Color(red: 0.10, green: 0.22, blue: 0.15).opacity(0.35)
+        case .lavender: return Color(red: 0.20, green: 0.12, blue: 0.28).opacity(0.35)
+        case .latte: return Color(red: 0.22, green: 0.15, blue: 0.10).opacity(0.35)
+        }
+    }
+}
+
 @MainActor
 final class EdgeDrawerSettings: ObservableObject {
     static let shared = EdgeDrawerSettings()
@@ -73,6 +133,9 @@ final class EdgeDrawerSettings: ObservableObject {
     @Published var selectedTab: DrawerTab {
         didSet { UserDefaults.standard.set(selectedTab.rawValue, forKey: Self.selectedTabKey) }
     }
+    @Published var theme: DrawerThemePreset {
+        didSet { UserDefaults.standard.set(theme.rawValue, forKey: Self.themeKey) }
+    }
 
     var onChange: (() -> Void)?
 
@@ -82,6 +145,7 @@ final class EdgeDrawerSettings: ObservableObject {
     private static let triggerModeKey = "agentpet.edgedrawer.triggerMode"
     private static let isPinnedKey = "agentpet.edgedrawer.isPinned"
     private static let selectedTabKey = "agentpet.edgedrawer.selectedTab"
+    private static let themeKey = "agentpet.edgedrawer.theme"
 
     private init() {
         let d = UserDefaults.standard
@@ -104,6 +168,10 @@ final class EdgeDrawerSettings: ObservableObject {
         } else {
             selectedTab = .notes
         }
+        if let rawTheme = d.string(forKey: Self.themeKey), let t = DrawerThemePreset(rawValue: rawTheme) {
+            theme = t
+        } else {
+            theme = .midnight
+        }
     }
 }
-

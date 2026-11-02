@@ -2,6 +2,13 @@ import AppKit
 import SwiftUI
 import Combine
 
+/// A custom NSPanel that allows borderless windows to become key windows and
+/// receive keyboard focus (essential for TextEditor, TextField, and shortcuts).
+final class KeyableDrawerPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 @MainActor
 final class EdgeDrawerWindowController: ObservableObject {
     static let shared = EdgeDrawerWindowController()
@@ -9,12 +16,13 @@ final class EdgeDrawerWindowController: ObservableObject {
     @Published private(set) var isOpen: Bool = false
 
     private var handlePanel: NSPanel?
-    private var drawerPanel: NSPanel?
+    private var drawerPanel: KeyableDrawerPanel?
 
     private var dwellTimer: Task<Void, Never>?
     private var closeTimer: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
-    private var keyMonitor: Any?
+    private var localKeyMonitor: Any?
+    private var globalKeyMonitor: Any?
 
     private var isDraggingHandle = false
     private var dragStartY: CGFloat = 0
@@ -117,10 +125,10 @@ final class EdgeDrawerWindowController: ObservableObject {
 
     // MARK: - Drawer Panel
 
-    private func makeDrawerPanel() -> NSPanel {
-        let panel = NSPanel(
+    private func makeDrawerPanel() -> KeyableDrawerPanel {
+        let panel = KeyableDrawerPanel(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 500),
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -128,6 +136,7 @@ final class EdgeDrawerWindowController: ObservableObject {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
+        panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let drawerView = CozyEdgeDrawerView(onClose: { [weak self] in
@@ -176,7 +185,10 @@ final class EdgeDrawerWindowController: ObservableObject {
         if let tab {
             EdgeDrawerSettings.shared.selectedTab = tab
         }
-        guard !isOpen else { return }
+        guard !isOpen else {
+            drawerPanel?.makeKeyAndOrderFront(nil)
+            return
+        }
         isOpen = true
 
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
@@ -190,16 +202,21 @@ final class EdgeDrawerWindowController: ObservableObject {
 
         drawerPanel?.setFrame(NSRect(x: endX, y: y, width: width, height: height), display: true)
         drawerPanel?.alphaValue = 0.0
-        drawerPanel?.orderFront(nil)
+        drawerPanel?.makeKeyAndOrderFront(nil)
 
         if animated {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.22
                 context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 drawerPanel?.animator().alphaValue = 1.0
+            } completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.drawerPanel?.makeKey()
+                }
             }
         } else {
             drawerPanel?.alphaValue = 1.0
+            drawerPanel?.makeKey()
         }
     }
 
@@ -230,7 +247,6 @@ final class EdgeDrawerWindowController: ObservableObject {
         closeTimer?.cancel()
         dwellTimer?.cancel()
 
-        // 160ms dwell filter to prevent accidental triggers on rapid mouse moves
         dwellTimer = Task {
             try? await Task.sleep(nanoseconds: 160_000_000)
             guard !Task.isCancelled else { return }
@@ -277,23 +293,35 @@ final class EdgeDrawerWindowController: ObservableObject {
     // MARK: - Global Hotkeys
 
     private func setupHotkeys() {
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            // Esc closes drawer if open
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 && self?.isOpen == true {
                 self?.closeDrawer(animated: true)
                 return nil
             }
-            // Option + T (keyCode 17) -> toggle drawer
             if event.modifierFlags.contains(.option) && event.keyCode == 17 {
                 self?.toggleDrawer()
                 return nil
             }
-            // Option + N (keyCode 45) -> open drawer directly to Notes
             if event.modifierFlags.contains(.option) && event.keyCode == 45 {
                 self?.openDrawer(animated: true, tab: .notes)
                 return nil
             }
             return event
+        }
+
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            // Option + T (keyCode 17)
+            if event.modifierFlags.contains(.option) && event.keyCode == 17 {
+                MainActor.assumeIsolated {
+                    self?.toggleDrawer()
+                }
+            }
+            // Option + N (keyCode 45)
+            if event.modifierFlags.contains(.option) && event.keyCode == 45 {
+                MainActor.assumeIsolated {
+                    self?.openDrawer(animated: true, tab: .notes)
+                }
+            }
         }
     }
 }
@@ -308,10 +336,11 @@ private struct HandleContentView: View {
     var onDragUpdate: (CGFloat) -> Void
 
     @State private var isHovered = false
+    @ObservedObject private var settings = EdgeDrawerSettings.shared
 
     var body: some View {
         Capsule()
-            .fill(isHovered ? Color.accentColor.opacity(0.8) : Color.primary.opacity(0.25))
+            .fill(isHovered ? settings.theme.accentColor.opacity(0.85) : Color.primary.opacity(0.25))
             .frame(width: isHovered ? 8 : 5, height: 48)
             .animation(.easeInOut(duration: 0.15), value: isHovered)
             .onHover { inside in

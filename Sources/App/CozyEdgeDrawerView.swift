@@ -3,7 +3,7 @@ import SwiftUI
 struct CozyEdgeDrawerView: View {
     @ObservedObject private var settings = EdgeDrawerSettings.shared
     @State private var stats: DrawerProfileStats?
-    @State private var isRefreshing = false
+    @State private var showThemePicker = false
 
     var onClose: () -> Void = {}
 
@@ -12,11 +12,12 @@ struct CozyEdgeDrawerView: View {
             // Header
             HStack(spacing: 8) {
                 // Mascot / Title
-                HStack(spacing: 5) {
-                    Text("🐰")
+                HStack(spacing: 6) {
+                    Text(settings.theme.emoji)
                         .font(.system(size: 16))
                     Text("Titroutine")
                         .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.primary)
                 }
 
                 Spacer()
@@ -24,21 +25,42 @@ struct CozyEdgeDrawerView: View {
                 // Stats badges
                 if let stats {
                     HStack(spacing: 6) {
-                        Text("🔥 \(stats.streak)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.orange.opacity(0.12)))
+                        HStack(spacing: 3) {
+                            Text("🔥")
+                            Text("\(stats.streak)")
+                                .fontWeight(.bold)
+                        }
+                        .font(.system(size: 11))
+                        .foregroundStyle(settings.theme.accentColor)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(settings.theme.accentColor.opacity(0.15)))
 
-                        Text("🪙 \(stats.coins)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.yellow)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.yellow.opacity(0.12)))
+                        HStack(spacing: 3) {
+                            Text("🪙")
+                            Text("\(stats.coins)")
+                                .fontWeight(.bold)
+                        }
+                        .font(.system(size: 11))
+                        .foregroundStyle(.yellow)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.yellow.opacity(0.15)))
                     }
                 }
+
+                // Theme selector button
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        showThemePicker.toggle()
+                    }
+                }) {
+                    Image(systemName: "paintpalette.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(showThemePicker ? settings.theme.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Đổi giao diện Theme")
 
                 // Web App link
                 Button(action: openWebApp) {
@@ -55,7 +77,7 @@ struct CozyEdgeDrawerView: View {
                 }) {
                     Image(systemName: settings.isPinned ? "pin.fill" : "pin")
                         .font(.system(size: 12))
-                        .foregroundStyle(settings.isPinned ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(settings.isPinned ? settings.theme.accentColor : Color.secondary)
                 }
                 .buttonStyle(.plain)
                 .help(settings.isPinned ? "Bỏ ghim (tự ẩn khi rê chuột ra ngoài)" : "Ghim cửa sổ trên màn hình")
@@ -71,6 +93,43 @@ struct CozyEdgeDrawerView: View {
             }
             .padding(.top, 2)
 
+            // Theme Picker dropdown strip
+            if showThemePicker {
+                HStack(spacing: 8) {
+                    ForEach(DrawerThemePreset.allCases) { t in
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                settings.theme = t
+                            }
+                        }) {
+                            HStack(spacing: 4) {
+                                Text(t.emoji)
+                                    .font(.system(size: 11))
+                                Text(t.displayName)
+                                    .font(.system(size: 10, weight: settings.theme == t ? .bold : .medium))
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(settings.theme == t ? t.accentColor.opacity(0.3) : Color.primary.opacity(0.06))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(settings.theme == t ? t.accentColor : Color.clear, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(6)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(settings.theme.cardBackground)
+                )
+                .transition(.asymmetric(insertion: .scale.combined(with: .opacity), removal: .opacity))
+            }
+
             // Segmented Tab Picker
             HStack(spacing: 4) {
                 ForEach(DrawerTab.allCases) { tab in
@@ -84,20 +143,20 @@ struct CozyEdgeDrawerView: View {
                                 .font(.system(size: 11, weight: settings.selectedTab == tab ? .semibold : .regular))
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 5)
+                        .padding(.vertical, 6)
                         .background(
-                            RoundedRectangle(cornerRadius: 7)
-                                .fill(settings.selectedTab == tab ? Color.accentColor.opacity(0.2) : Color.clear)
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(settings.selectedTab == tab ? settings.theme.accentColor.opacity(0.25) : Color.clear)
                         )
-                        .foregroundStyle(settings.selectedTab == tab ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(settings.selectedTab == tab ? settings.theme.accentColor : Color.secondary)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(2)
+            .padding(3)
             .background(
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(Color.primary.opacity(0.04))
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(settings.theme.cardBackground)
             )
 
             // Content Area
@@ -116,14 +175,19 @@ struct CozyEdgeDrawerView: View {
         .padding(14)
         .frame(width: 380)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(.ultraThinMaterial)
+            ZStack {
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(settings.theme.tintColor.opacity(0.85))
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(.ultraThinMaterial)
+            }
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(settings.theme.accentColor.opacity(0.25), lineWidth: 1.2)
         )
-        .shadow(color: .black.opacity(0.25), radius: 16, x: settings.edgeSide == .right ? -4 : 4, y: 4)
+        .shadow(color: settings.theme.accentColor.opacity(0.12), radius: 20, x: settings.edgeSide == .right ? -4 : 4, y: 4)
+        .shadow(color: .black.opacity(0.35), radius: 14, x: settings.edgeSide == .right ? -4 : 4, y: 4)
         .onAppear {
             refreshStats()
         }
