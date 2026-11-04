@@ -26,6 +26,7 @@ struct DrawerHabitsView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var selectedFilter: HabitTimeOfDayFilter = .all
+    @State private var expandedMonthHabitId: String? = nil
 
     // Quick Add Habit form
     @State private var showAddForm = false
@@ -327,8 +328,45 @@ struct DrawerHabitsView: View {
                                 .frame(width: 5, height: 5)
                         }
                     }
-                    .padding(.leading, 4)
+                    .padding(.leading, 2)
                 }
+
+                // Month Calendar Expansion Toggle
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        if expandedMonthHabitId == habit.id {
+                            expandedMonthHabitId = nil
+                        } else {
+                            expandedMonthHabitId = habit.id
+                        }
+                    }
+                }) {
+                    Image(systemName: expandedMonthHabitId == habit.id ? "calendar.badge.minus" : "calendar")
+                        .font(.system(size: 11))
+                        .foregroundStyle(expandedMonthHabitId == habit.id ? settings.theme.accentColor : Color.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(expandedMonthHabitId == habit.id ? settings.theme.accentColor.opacity(0.2) : Color.primary.opacity(0.06))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(expandedMonthHabitId == habit.id ? "Thu gọn lịch tháng" : "Xem chuỗi theo tháng & check-in bù")
+            }
+
+            if expandedMonthHabitId == habit.id {
+                Divider()
+                    .padding(.vertical, 2)
+
+                HabitMonthGridView(
+                    habit: habit,
+                    onToggleToday: { willComplete in
+                        if let idx = habits.firstIndex(where: { $0.id == habit.id }) {
+                            habits[idx].isCompleted = willComplete
+                        }
+                    }
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(8)
@@ -429,6 +467,311 @@ struct DrawerHabitsView: View {
                 self.errorMessage = "Lỗi tạo thói quen: \(error.localizedDescription)"
                 self.isSubmitting = false
             }
+        }
+    }
+}
+
+// MARK: - Habit Monthly Calendar & Backfill Grid View
+
+struct HabitMonthGridView: View {
+    let habit: DrawerHabitItem
+    let onToggleToday: (Bool) -> Void
+    @ObservedObject private var settings = EdgeDrawerSettings.shared
+
+    @State private var viewDate: Date = Date()
+    @State private var completedDates: Set<String> = []
+    @State private var isLoading = false
+
+    private let calendar = Calendar.current
+    private let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar.current
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private var todayString: String {
+        dayFormatter.string(from: Date())
+    }
+
+    private var currentMonthKey: String {
+        let f = DateFormatter()
+        f.calendar = Calendar.current
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM"
+        return f.string(from: viewDate)
+    }
+
+    private var monthTitle: String {
+        let f = DateFormatter()
+        f.calendar = Calendar.current
+        f.timeZone = TimeZone.current
+        f.dateFormat = "MM/yyyy"
+        return f.string(from: viewDate)
+    }
+
+    private var isCurrentOrFutureMonth: Bool {
+        let nowComps = calendar.dateComponents([.year, .month], from: Date())
+        let viewComps = calendar.dateComponents([.year, .month], from: viewDate)
+        if let vy = viewComps.year, let ny = nowComps.year,
+           let vm = viewComps.month, let nm = nowComps.month {
+            return (vy > ny) || (vy == ny && vm >= nm)
+        }
+        return false
+    }
+
+    private struct DayItem: Identifiable {
+        var id: String { dateString }
+        let dayNumber: Int
+        let dateString: String
+        let isToday: Bool
+        let isPast: Bool
+        let isFuture: Bool
+    }
+
+    private func leadingOffset() -> Int {
+        var comps = calendar.dateComponents([.year, .month], from: viewDate)
+        comps.day = 1
+        guard let start = calendar.date(from: comps) else { return 0 }
+        let weekday = calendar.component(.weekday, from: start)
+        return (weekday + 5) % 7
+    }
+
+    private func computeMonthDays() -> [DayItem] {
+        var comps = calendar.dateComponents([.year, .month], from: viewDate)
+        comps.day = 1
+        guard let startOfMonth = calendar.date(from: comps),
+              let range = calendar.range(of: .day, in: .month, for: startOfMonth)
+        else { return [] }
+
+        let today = todayString
+        return range.compactMap { d -> DayItem? in
+            guard let date = calendar.date(byAdding: .day, value: d - 1, to: startOfMonth) else { return nil }
+            let dateStr = dayFormatter.string(from: date)
+            return DayItem(
+                dayNumber: d,
+                dateString: dateStr,
+                isToday: dateStr == today,
+                isPast: dateStr < today,
+                isFuture: dateStr > today
+            )
+        }
+    }
+
+    private struct MonthSummary {
+        let completed: Int
+        let elapsed: Int
+        let rate: Int
+        let streak: Int
+    }
+
+    private func computeSummary(days: [DayItem]) -> MonthSummary {
+        let today = todayString
+        let completedCount = days.filter { completedDates.contains($0.dateString) }.count
+        let elapsedCount = days.filter { $0.dateString <= today }.count
+        let rate = elapsedCount > 0 ? (completedCount * 100 / elapsedCount) : 0
+
+        var maxStreak = 0
+        var current = 0
+        for d in days {
+            if completedDates.contains(d.dateString) {
+                current += 1
+                maxStreak = max(maxStreak, current)
+            } else if d.dateString <= today {
+                current = 0
+            }
+        }
+
+        return MonthSummary(completed: completedCount, elapsed: elapsedCount, rate: rate, streak: maxStreak)
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            // Month navigation header
+            HStack {
+                Button(action: { changeMonth(by: -1) }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.secondary)
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Text("Tháng \(monthTitle)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(settings.theme.accentColor)
+
+                Spacer()
+
+                Button(action: { changeMonth(by: 1) }) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(isCurrentOrFutureMonth ? Color.secondary.opacity(0.2) : Color.secondary)
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+                .disabled(isCurrentOrFutureMonth)
+            }
+            .padding(.horizontal, 4)
+
+            // Day of week headers: T2 .. CN
+            HStack(spacing: 0) {
+                ForEach(["T2", "T3", "T4", "T5", "T6", "T7", "CN"], id: \.self) { w in
+                    Text(w)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.secondary.opacity(0.7))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            // Month Grid
+            let days = computeMonthDays()
+            let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 7)
+
+            LazyVGrid(columns: columns, spacing: 4) {
+                // Leading blank placeholders
+                ForEach(0..<leadingOffset(), id: \.self) { _ in
+                    Color.clear
+                        .aspectRatio(1, contentMode: .fit)
+                }
+
+                // Days
+                ForEach(days) { item in
+                    dayCell(item: item)
+                }
+            }
+
+            // Summary stats & retroactive hint
+            let summary = computeSummary(days: days)
+            VStack(spacing: 3) {
+                HStack {
+                    Text("Đạt \(summary.completed)/\(summary.elapsed) ngày (\(summary.rate)%)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.secondary)
+                    Spacer()
+                    if summary.streak > 0 {
+                        Text("🔥 Chuỗi \(summary.streak) ngày")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.orange)
+                    }
+                }
+                Text("💡 Chạm vào ngày quá khứ để check-in bù nếu hôm đó quên tích nhé!")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.secondary.opacity(0.8))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, 2)
+            .padding(.horizontal, 2)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.primary.opacity(0.03))
+        )
+        .onAppear {
+            loadMonthData()
+        }
+    }
+
+    @ViewBuilder
+    private func dayCell(item: DayItem) -> some View {
+        let isCompleted = completedDates.contains(item.dateString)
+        let isInteractive = !item.isFuture
+
+        Button(action: {
+            guard isInteractive else { return }
+            toggleDay(dateString: item.dateString)
+        }) {
+            ZStack {
+                if isCompleted {
+                    Circle()
+                        .fill(settings.theme.accentColor)
+                } else if item.isToday {
+                    Circle()
+                        .stroke(settings.theme.accentColor, lineWidth: 1.5)
+                        .background(Circle().fill(settings.theme.accentColor.opacity(0.1)))
+                } else if item.isPast {
+                    Circle()
+                        .fill(Color.primary.opacity(0.06))
+                } else {
+                    Circle()
+                        .strokeBorder(Color.primary.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [2]))
+                }
+
+                Text("\(item.dayNumber)")
+                    .font(.system(size: 9, weight: isCompleted || item.isToday ? .heavy : .medium))
+                    .foregroundStyle(isCompleted ? Color.black : (item.isFuture ? Color.secondary.opacity(0.3) : Color.primary.opacity(0.85)))
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isInteractive)
+        .help(isInteractive ? "\(item.dateString): \(isCompleted ? "Đã xong (Bấm để hủy)" : "Chưa tích (Bấm để check-in bù)")" : item.dateString)
+    }
+
+    private func toggleDay(dateString: String) {
+        let wasCompleted = completedDates.contains(dateString)
+        let willComplete = !wasCompleted
+
+        // Optimistic update
+        if willComplete {
+            completedDates.insert(dateString)
+        } else {
+            completedDates.remove(dateString)
+        }
+
+        if dateString == todayString {
+            onToggleToday(willComplete)
+        }
+
+        Task {
+            do {
+                try await TitroutineClient.shared.toggleHabit(habitId: habit.id, date: dateString, willComplete: willComplete)
+            } catch {
+                // Revert on error
+                await MainActor.run {
+                    if wasCompleted {
+                        completedDates.insert(dateString)
+                    } else {
+                        completedDates.remove(dateString)
+                    }
+                    if dateString == todayString {
+                        onToggleToday(wasCompleted)
+                    }
+                }
+            }
+        }
+    }
+
+    private func loadMonthData() {
+        isLoading = true
+        let key = currentMonthKey
+        Task {
+            do {
+                var dates = try await TitroutineClient.shared.fetchHabitMonthLogs(habitId: habit.id, monthKey: key)
+                if key == String(todayString.prefix(7)) && habit.isCompleted {
+                    dates.insert(todayString)
+                }
+                await MainActor.run {
+                    self.completedDates = dates
+                    self.isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                }
+            }
+        }
+    }
+
+    private func changeMonth(by delta: Int) {
+        if let next = calendar.date(byAdding: .month, value: delta, to: viewDate) {
+            viewDate = next
+            loadMonthData()
         }
     }
 }

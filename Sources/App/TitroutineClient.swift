@@ -529,8 +529,8 @@ final class TitroutineClient: ObservableObject {
         )
     }
 
-    /// Toggle a habit's completion status for today
-    func toggleHabit(habitId: String, willComplete: Bool) async throws {
+    /// Toggle a habit's completion status for today or a specific retroactive date
+    func toggleHabit(habitId: String, date: String? = nil, willComplete: Bool) async throws {
         let userId = try await fetchUserId()
         struct UpsertLog: Encodable {
             let habitId: String
@@ -538,13 +538,36 @@ final class TitroutineClient: ObservableObject {
             let date: String
             let isCompleted: Bool
         }
+        let targetDate = date ?? Self.localToday()
         let body = UpsertLog(
             habitId: habitId,
             userId: userId,
-            date: Self.localToday(),
+            date: targetDate,
             isCompleted: willComplete
         )
         try await restUpsert(table: "habit_logs", onConflict: "habit_id,date", body: body)
+    }
+
+    /// Fetch all completed dates for a specific habit in a given year-month ("YYYY-MM")
+    func fetchHabitMonthLogs(habitId: String, monthKey: String) async throws -> Set<String> {
+        let userId = try await fetchUserId()
+        let startDate = "\(monthKey)-01"
+        let endDate = "\(monthKey)-31"
+        let logs: [LogRow] = (try? await restGET(
+            table: "habit_logs",
+            query: [
+                .init(name: "user_id", value: "eq.\(userId)"),
+                .init(name: "habit_id", value: "eq.\(habitId)"),
+                .init(name: "select", value: "date,is_completed"),
+                .init(name: "date", value: "gte.\(startDate)"),
+                .init(name: "date", value: "lte.\(endDate)")
+            ]
+        )) ?? []
+        let completed = logs.compactMap { log -> String? in
+            guard log.isCompleted == true, let d = log.date else { return nil }
+            return d
+        }
+        return Set(completed)
     }
 
     /// Increment or decrement a counter habit (e.g. drinking water, reading pages)
