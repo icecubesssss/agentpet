@@ -340,6 +340,11 @@ final class EdgeDrawerWindowController: ObservableObject {
                 self?.openDrawer(animated: true, tab: .notes)
                 return nil
             }
+            // Option + P (keyCode 35) -> open drawer directly to Timer / Pomodoro
+            if event.modifierFlags.contains(.option) && event.keyCode == 35 {
+                self?.openDrawer(animated: true, tab: .timer)
+                return nil
+            }
             return event
         }
 
@@ -354,6 +359,12 @@ final class EdgeDrawerWindowController: ObservableObject {
             if event.modifierFlags.contains(.option) && event.keyCode == 45 {
                 MainActor.assumeIsolated {
                     self?.openDrawer(animated: true, tab: .notes)
+                }
+            }
+            // Option + P (keyCode 35)
+            if event.modifierFlags.contains(.option) && event.keyCode == 35 {
+                MainActor.assumeIsolated {
+                    self?.openDrawer(animated: true, tab: .timer)
                 }
             }
         }

@@ -14,7 +14,12 @@ public struct DrawerHabitItem: Identifiable, Sendable, Equatable {
     public let id: String
     public let title: String
     public var isCompleted: Bool
+    public let type: String // "boolean", "counter", "timer"
+    public var currentValue: Int
+    public let targetCount: Int
+    public let targetSeconds: Int
     public let timeOfDay: String?
+    public var weeklyLogs: [Bool] // 7 days of current week (Mon..Sun)
 }
 
 public struct DrawerTaskItem: Identifiable, Sendable, Equatable {
@@ -23,6 +28,7 @@ public struct DrawerTaskItem: Identifiable, Sendable, Equatable {
     public var notes: String?
     public var status: String // "todo", "in_progress", "done"
     public var priority: String // "low", "medium", "high"
+    public var assigneeType: String // "self", "pet"
     public var focusDuration: Int
     public var deadline: String?
     public var startedAt: Date?
@@ -441,6 +447,7 @@ final class TitroutineClient: ObservableObject {
             notes: notes,
             status: "todo",
             priority: priority,
+            assigneeType: assigneeType,
             focusDuration: focusDuration,
             deadline: deadline,
             startedAt: nil
@@ -471,6 +478,45 @@ final class TitroutineClient: ObservableObject {
                     .init(name: "user_id", value: "eq.\(userId)")],
             body: PatchStatus(status: status, updatedAt: nowISO)
         )
+
+        if status == "done" {
+            // Reward focus tokens and carrot in background
+            Task {
+                struct TaskDurationRow: Decodable { let focusDuration: Int? }
+                let rows: [TaskDurationRow] = (try? await restGET(
+                    table: "tasks",
+                    query: [.init(name: "id", value: "eq.\(taskId)"), .init(name: "select", value: "focus_duration")]
+                )) ?? []
+                let duration = rows.first?.focusDuration ?? 25
+
+                struct ProfileTokensRow: Decodable { let focusTokens: Int? }
+                if let p: [ProfileTokensRow] = try? await restGET(
+                    table: "profiles",
+                    query: [.init(name: "id", value: "eq.\(userId)"), .init(name: "select", value: "focus_tokens")]
+                ), let currentTokens = p.first?.focusTokens {
+                    struct PatchTokens: Encodable { let focusTokens: Int }
+                    try? await restPATCH(
+                        table: "profiles",
+                        query: [.init(name: "id", value: "eq.\(userId)")],
+                        body: PatchTokens(focusTokens: currentTokens + duration)
+                    )
+                }
+
+                struct InvConsumablesRow: Decodable { let consumables: [String: Int]? }
+                if let inv: [InvConsumablesRow] = try? await restGET(
+                    table: "inventory",
+                    query: [.init(name: "user_id", value: "eq.\(userId)"), .init(name: "select", value: "consumables")]
+                ), var cons = inv.first?.consumables {
+                    cons["carrot"] = (cons["carrot"] ?? 0) + 1
+                    struct PatchInv: Encodable { let consumables: [String: Int] }
+                    try? await restPATCH(
+                        table: "inventory",
+                        query: [.init(name: "user_id", value: "eq.\(userId)")],
+                        body: PatchInv(consumables: cons)
+                    )
+                }
+            }
+        }
     }
 
     /// Delete a task
@@ -501,34 +547,128 @@ final class TitroutineClient: ObservableObject {
         try await restUpsert(table: "habit_logs", onConflict: "habit_id,date", body: body)
     }
 
-    /// Fetch all habits for today with completion status
+    /// Increment or decrement a counter habit (e.g. drinking water, reading pages)
+    func incrementCounterHabit(habitId: String, delta: Int, targetCount: Int) async throws {
+        let userId = try await fetchUserId()
+        let today = Self.localToday()
+
+        let logs: [LogRow] = (try? await restGET(
+            table: "habit_logs",
+            query: [.init(name: "user_id", value: "eq.\(userId)"),
+                    .init(name: "habit_id", value: "eq.\(habitId)"),
+                    .init(name: "date", value: "eq.\(today)")]
+        )) ?? []
+
+        let currentVal = logs.first?.value ?? 0
+        let newVal = max(0, currentVal + delta)
+        let willComplete = newVal >= targetCount
+
+        struct UpsertCounterLog: Encodable {
+            let habitId: String
+            let userId: String
+            let date: String
+            let isCompleted: Bool
+            let value: Int
+        }
+        let body = UpsertCounterLog(
+            habitId: habitId,
+            userId: userId,
+            date: today,
+            isCompleted: willComplete,
+            value: newVal
+        )
+        try await restUpsert(table: "habit_logs", onConflict: "habit_id,date", body: body)
+    }
+
+    /// Create a new habit from the Drawer
+    func createHabit(
+        title: String,
+        type: String = "boolean",
+        targetCount: Int = 1,
+        durationMinutes: Int = 20,
+        timeOfDay: String = "anytime"
+    ) async throws {
+        let userId = try await fetchUserId()
+        var config: [String: AnyCodable] = [:]
+        if type == "counter" {
+            config["target_count"] = AnyCodable(targetCount)
+        } else if type == "timer" {
+            config["target_time"] = AnyCodable(durationMinutes * 60)
+        }
+
+        struct InsertHabitBody: Encodable {
+            let userId: String
+            let title: String
+            let type: String
+            let config: [String: AnyCodable]
+            let timeOfDay: String
+        }
+        let body = InsertHabitBody(
+            userId: userId,
+            title: title,
+            type: type,
+            config: config,
+            timeOfDay: timeOfDay
+        )
+        struct CreatedHabitRow: Decodable { let id: String }
+        let _: CreatedHabitRow = try await restPOST(table: "habits", body: body)
+    }
+
+    /// Fetch all habits with completion status, counter values, and weekly streak dots
     func fetchDrawerHabits() async throws -> [DrawerHabitItem] {
         let userId = try await fetchUserId()
         let habits: [HabitDetailRow] = try await restGET(
             table: "habits",
             query: [.init(name: "user_id", value: "eq.\(userId)"),
-                    .init(name: "select", value: "id,title,frequency,time_of_day"),
+                    .init(name: "select", value: "id,title,type,config,frequency,time_of_day"),
                     .init(name: "archived_at", value: "is.null"),
                     .init(name: "type", value: "neq.negative")]
         )
-        let logs: [LogRow] = try await restGET(
+        let weekDates = Self.currentWeekDates()
+        let minDate = weekDates.first ?? Self.localToday()
+        let maxDate = weekDates.last ?? Self.localToday()
+
+        let logs: [LogRow] = (try? await restGET(
             table: "habit_logs",
             query: [.init(name: "user_id", value: "eq.\(userId)"),
-                    .init(name: "select", value: "*"),
-                    .init(name: "date", value: "eq.\(Self.localToday())")]
-        )
-        let completedIDs = Set(logs.filter { $0.isCompleted == true }.map(\.habitId))
+                    .init(name: "select", value: "habit_id,date,is_completed,value"),
+                    .init(name: "date", value: "gte.\(minDate)"),
+                    .init(name: "date", value: "lte.\(maxDate)")]
+        )) ?? []
+
+        let today = Self.localToday()
         let jsWeekday = Calendar.current.component(.weekday, from: Date()) - 1
 
         return habits.compactMap { h in
             if let freq = h.frequency, freq.type == "specific_days", let days = freq.days {
                 if !days.contains(jsWeekday) { return nil }
             }
+            let todayLog = logs.first(where: { $0.habitId == h.id && $0.date == today })
+            let isCompleted = todayLog?.isCompleted == true
+            let currentVal = todayLog?.value ?? 0
+            let habitType = h.type ?? "boolean"
+
+            var targetCount = 1
+            var targetSeconds = 25 * 60
+            if let cfg = h.config {
+                if let tc = cfg["target_count"]?.value as? Int { targetCount = tc }
+                if let tt = cfg["target_time"]?.value as? Int { targetSeconds = tt }
+            }
+
+            let weeklyLogs = weekDates.map { date in
+                logs.contains { $0.habitId == h.id && $0.date == date && $0.isCompleted == true }
+            }
+
             return DrawerHabitItem(
                 id: h.id,
                 title: h.title,
-                isCompleted: completedIDs.contains(h.id),
-                timeOfDay: h.timeOfDay
+                isCompleted: isCompleted,
+                type: habitType,
+                currentValue: currentVal,
+                targetCount: targetCount,
+                targetSeconds: targetSeconds,
+                timeOfDay: h.timeOfDay,
+                weeklyLogs: weeklyLogs
             )
         }
     }
@@ -539,7 +679,7 @@ final class TitroutineClient: ObservableObject {
         let rows: [TaskDetailRow] = try await restGET(
             table: "tasks",
             query: [.init(name: "user_id", value: "eq.\(userId)"),
-                    .init(name: "select", value: "id,title,notes,status,priority,focus_duration,deadline,updated_at"),
+                    .init(name: "select", value: "id,title,notes,status,priority,assignee_type,focus_duration,deadline,updated_at"),
                     .init(name: "order", value: "created_at.desc")]
         )
         return rows.map { r in
@@ -549,6 +689,7 @@ final class TitroutineClient: ObservableObject {
                 notes: r.notes,
                 status: r.status,
                 priority: r.priority ?? "medium",
+                assigneeType: r.assigneeType ?? "self",
                 focusDuration: r.focusDuration ?? 25,
                 deadline: r.deadline,
                 startedAt: r.status == "in_progress" ? Self.parseDate(r.updatedAt ?? "") : nil
@@ -630,8 +771,10 @@ final class TitroutineClient: ObservableObject {
     }
     private struct LogRow: Decodable {
         let habitId: String
+        let date: String?
         let isCompleted: Bool?
         let isFailed: Bool?
+        let value: Int?
     }
     private struct ActiveRow: Decodable {
         let id: String
@@ -644,6 +787,8 @@ final class TitroutineClient: ObservableObject {
     private struct HabitDetailRow: Decodable {
         let id: String
         let title: String
+        let type: String?
+        let config: [String: AnyCodable]?
         let frequency: HabitFrequency?
         let timeOfDay: String?
     }
@@ -653,9 +798,25 @@ final class TitroutineClient: ObservableObject {
         let notes: String?
         let status: String
         let priority: String?
+        let assigneeType: String?
         let focusDuration: Int?
         let deadline: String?
         let updatedAt: String?
+    }
+
+    private static func currentWeekDates() -> [String] {
+        let cal = Calendar.current
+        var comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
+        comps.weekday = 2 // Monday
+        let monday = cal.date(from: comps) ?? Date()
+        let f = DateFormatter()
+        f.calendar = cal
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return (0..<7).compactMap { i in
+            guard let d = cal.date(byAdding: .day, value: i, to: monday) else { return nil }
+            return f.string(from: d)
+        }
     }
 
     private static let encoder: JSONEncoder = {

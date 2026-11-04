@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CozyEdgeDrawerView: View {
     @ObservedObject private var settings = EdgeDrawerSettings.shared
+    @ObservedObject private var timer = FocusTimerManager.shared
     @State private var stats: DrawerProfileStats?
     @State private var showThemePicker = false
 
@@ -21,6 +22,26 @@ struct CozyEdgeDrawerView: View {
                 }
 
                 Spacer()
+
+                // Live Timer Ticker (when running or paused)
+                if timer.isRunning || timer.isPaused {
+                    Button(action: {
+                        settings.selectedTab = .timer
+                    }) {
+                        HStack(spacing: 3) {
+                            Text(timer.carrotStageEmoji)
+                            Text(timer.formattedTime)
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                        }
+                        .foregroundStyle(settings.theme.accentColor)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(settings.theme.accentColor.opacity(0.18)))
+                        .overlay(Capsule().stroke(settings.theme.accentColor.opacity(0.4), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Xem bộ đếm Pomodoro")
+                }
 
                 // Stats badges
                 if let stats {
@@ -165,12 +186,14 @@ struct CozyEdgeDrawerView: View {
             // Content Area
             Group {
                 switch settings.selectedTab {
-                case .notes:
-                    QuickNotesView()
+                case .timer:
+                    FocusTimerView()
                 case .tasks:
                     DrawerTasksView()
                 case .habits:
                     DrawerHabitsView()
+                case .notes:
+                    QuickNotesView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

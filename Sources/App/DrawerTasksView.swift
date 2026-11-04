@@ -1,16 +1,37 @@
 import SwiftUI
 
+enum TaskFilterStatus: String, CaseIterable, Identifiable {
+    case all = "all"
+    case inProgress = "in_progress"
+    case todo = "todo"
+    case done = "done"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "Tất cả"
+        case .inProgress: return "Đang làm"
+        case .todo: return "Cần làm"
+        case .done: return "Đã xong"
+        }
+    }
+}
+
 struct DrawerTasksView: View {
     @ObservedObject private var settings = EdgeDrawerSettings.shared
+    @ObservedObject private var timer = FocusTimerManager.shared
 
     @State private var tasks: [DrawerTaskItem] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var filterStatus: TaskFilterStatus = .all
 
-    // Quick Add
+    // Quick Add Form
     @State private var newTitle = ""
     @State private var selectedPriority = "medium"
     @State private var focusDuration = 25
+    @State private var assigneeType = "self"
     @State private var isAdding = false
 
     var body: some View {
@@ -47,7 +68,7 @@ struct DrawerTasksView: View {
                 }
 
                 // Options strip
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Picker("", selection: $selectedPriority) {
                         Text("Vừa").tag("medium")
                         Text("Cao").tag("high")
@@ -55,7 +76,7 @@ struct DrawerTasksView: View {
                     }
                     .pickerStyle(.segmented)
                     .controlSize(.mini)
-                    .frame(width: 140)
+                    .frame(width: 130)
 
                     Menu {
                         Button("15 phút") { focusDuration = 15 }
@@ -68,7 +89,14 @@ struct DrawerTasksView: View {
                             .foregroundStyle(settings.theme.accentColor)
                     }
                     .menuStyle(.borderlessButton)
-                    .frame(width: 60)
+
+                    Picker("", selection: $assigneeType) {
+                        Text("👤 Tôi").tag("self")
+                        Text("🐰 Pet").tag("pet")
+                    }
+                    .pickerStyle(.segmented)
+                    .controlSize(.mini)
+                    .frame(width: 90)
 
                     Spacer()
                 }
@@ -83,6 +111,38 @@ struct DrawerTasksView: View {
                     .stroke(settings.theme.accentColor.opacity(0.15), lineWidth: 1)
             )
 
+            // Status Filter Tabs
+            HStack(spacing: 4) {
+                ForEach(TaskFilterStatus.allCases) { filter in
+                    let count = countFor(filter)
+                    Button(action: {
+                        filterStatus = filter
+                    }) {
+                        Text("\(filter.title) (\(count))")
+                            .font(.system(size: 10, weight: filterStatus == filter ? .bold : .medium))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(filterStatus == filter ? settings.theme.accentColor.opacity(0.25) : Color.primary.opacity(0.05))
+                            )
+                            .foregroundStyle(filterStatus == filter ? settings.theme.accentColor : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Spacer()
+
+                Button(action: loadTasks) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Tải lại danh sách")
+            }
+            .padding(.horizontal, 2)
+
             if let errorMessage {
                 Text(errorMessage)
                     .font(.system(size: 11))
@@ -90,17 +150,18 @@ struct DrawerTasksView: View {
             }
 
             // Task list
+            let filtered = filteredTasks()
             if isLoading && tasks.isEmpty {
                 Spacer()
                 ProgressView()
                 Spacer()
-            } else if tasks.isEmpty {
+            } else if filtered.isEmpty {
                 Spacer()
                 VStack(spacing: 6) {
                     Image(systemName: "checklist")
                         .font(.system(size: 24))
                         .foregroundStyle(.secondary)
-                    Text("Không có task nào. Thêm task phía trên nhé!")
+                    Text("Không có task nào trong mục này.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -108,31 +169,8 @@ struct DrawerTasksView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 8) {
-                        // In Progress
-                        let inProgress = tasks.filter { $0.status == "in_progress" }
-                        if !inProgress.isEmpty {
-                            sectionHeader(title: "ĐANG THỰC HIỆN", count: inProgress.count, color: settings.theme.accentColor)
-                            ForEach(inProgress) { task in
-                                taskRow(task: task)
-                            }
-                        }
-
-                        // Todo
-                        let todos = tasks.filter { $0.status == "todo" }
-                        if !todos.isEmpty {
-                            sectionHeader(title: "CẦN LÀM", count: todos.count, color: .primary)
-                            ForEach(todos) { task in
-                                taskRow(task: task)
-                            }
-                        }
-
-                        // Done
-                        let done = tasks.filter { $0.status == "done" }
-                        if !done.isEmpty {
-                            sectionHeader(title: "ĐÃ XONG", count: done.count, color: .secondary)
-                            ForEach(done) { task in
-                                taskRow(task: task)
-                            }
+                        ForEach(filtered) { task in
+                            taskRow(task: task)
                         }
                     }
                     .padding(.vertical, 4)
@@ -144,18 +182,28 @@ struct DrawerTasksView: View {
         }
     }
 
-    private func sectionHeader(title: String, count: Int, color: Color) -> some View {
-        HStack {
-            Text("\(title) (\(count))")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(color.opacity(0.85))
-            Spacer()
+    private func countFor(_ filter: TaskFilterStatus) -> Int {
+        switch filter {
+        case .all: return tasks.count
+        case .inProgress: return tasks.filter { $0.status == "in_progress" }.count
+        case .todo: return tasks.filter { $0.status == "todo" }.count
+        case .done: return tasks.filter { $0.status == "done" }.count
         }
-        .padding(.top, 4)
+    }
+
+    private func filteredTasks() -> [DrawerTaskItem] {
+        switch filterStatus {
+        case .all: return tasks
+        case .inProgress: return tasks.filter { $0.status == "in_progress" }
+        case .todo: return tasks.filter { $0.status == "todo" }
+        case .done: return tasks.filter { $0.status == "done" }
+        }
     }
 
     private func taskRow(task: DrawerTaskItem) -> some View {
-        HStack(spacing: 8) {
+        let isCurrentFocus = timer.isRunning && timer.activeTask?.id == task.id
+
+        return HStack(spacing: 8) {
             // Checkmark button
             Button(action: {
                 toggleTaskDone(task)
@@ -166,23 +214,52 @@ struct DrawerTasksView: View {
             }
             .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(task.title)
-                    .font(.system(size: 12, weight: task.status == "in_progress" ? .semibold : .regular))
-                    .strikethrough(task.status == "done")
-                    .foregroundStyle(task.status == "done" ? .secondary : .primary)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Text(task.title)
+                        .font(.system(size: 12, weight: task.status == "in_progress" ? .semibold : .regular))
+                        .strikethrough(task.status == "done")
+                        .foregroundStyle(task.status == "done" ? .secondary : .primary)
+                        .lineLimit(2)
+
+                    if task.assigneeType == "pet" {
+                        Text("🐰")
+                            .font(.system(size: 10))
+                    }
+                }
 
                 HStack(spacing: 6) {
+                    // Priority Pill
                     if task.priority == "high" {
                         Text("Cao")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.red)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.red.opacity(0.12)))
+                    } else if task.priority == "low" {
+                        Text("Thấp")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.green.opacity(0.12)))
                     }
+
+                    // Duration
                     Text("⏱ \(task.focusDuration)m")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
 
-                    if task.status == "in_progress", task.startedAt != nil {
+                    if isCurrentFocus {
+                        HStack(spacing: 3) {
+                            Text(timer.carrotStageEmoji)
+                            Text(timer.formattedTime)
+                                .fontWeight(.bold)
+                        }
+                        .font(.system(size: 10))
+                        .foregroundStyle(settings.theme.accentColor)
+                    } else if task.status == "in_progress" {
                         Text("• đang chạy")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(settings.theme.accentColor)
@@ -192,33 +269,30 @@ struct DrawerTasksView: View {
 
             Spacer()
 
-            // Action buttons
-            if task.status == "todo" {
+            // Quick Focus button
+            if task.status != "done" {
                 Button(action: {
-                    setStatus(task, to: "in_progress")
+                    startFocusOnTask(task)
                 }) {
-                    Text("Bắt đầu")
-                        .font(.system(size: 10, weight: .medium))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(settings.theme.accentColor.opacity(0.2)))
-                        .foregroundStyle(settings.theme.accentColor)
+                    HStack(spacing: 3) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 8))
+                        Text(isCurrentFocus ? "Đang tập trung" : "Tập trung")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(settings.theme.accentColor.opacity(isCurrentFocus ? 0.35 : 0.2))
+                    )
+                    .foregroundStyle(settings.theme.accentColor)
                 }
                 .buttonStyle(.plain)
-            } else if task.status == "in_progress" {
-                Button(action: {
-                    setStatus(task, to: "todo")
-                }) {
-                    Text("Tạm dừng")
-                        .font(.system(size: 10, weight: .medium))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.secondary.opacity(0.2)))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
+                .help("Bắt đầu bộ đếm Pomodoro và trồng Cà rốt cho Task này")
             }
 
+            // Delete
             Button(action: {
                 deleteTask(task)
             }) {
@@ -233,6 +307,11 @@ struct DrawerTasksView: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(task.status == "in_progress" ? settings.theme.accentColor.opacity(0.12) : settings.theme.cardBackground)
         )
+    }
+
+    private func startFocusOnTask(_ task: DrawerTaskItem) {
+        timer.start(task: task, minutes: task.focusDuration, type: .pomodoro)
+        settings.selectedTab = .timer
     }
 
     private func loadTasks() {
@@ -259,6 +338,7 @@ struct DrawerTasksView: View {
                 let created = try await TitroutineClient.shared.createTask(
                     title: trimmed,
                     priority: selectedPriority,
+                    assigneeType: assigneeType,
                     focusDuration: focusDuration
                 )
                 self.tasks.insert(created, at: 0)

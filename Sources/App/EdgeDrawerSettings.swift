@@ -29,24 +29,27 @@ enum DrawerTriggerMode: String, CaseIterable, Identifiable {
 }
 
 enum DrawerTab: String, CaseIterable, Identifiable {
-    case notes = "notes"
+    case timer = "timer"
     case tasks = "tasks"
     case habits = "habits"
+    case notes = "notes"
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .notes: return NSLocalizedString("Notes", comment: "")
+        case .timer: return NSLocalizedString("Timer", comment: "")
         case .tasks: return NSLocalizedString("Tasks", comment: "")
         case .habits: return NSLocalizedString("Habits", comment: "")
+        case .notes: return NSLocalizedString("Notes", comment: "")
         }
     }
 
     var icon: String {
         switch self {
-        case .notes: return "note.text"
+        case .timer: return "timer"
         case .tasks: return "checklist"
         case .habits: return "repeat"
+        case .notes: return "note.text"
         }
     }
 }
