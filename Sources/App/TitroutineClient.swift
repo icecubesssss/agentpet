@@ -20,6 +20,7 @@ public struct DrawerHabitItem: Identifiable, Sendable, Equatable {
     public let targetSeconds: Int
     public let timeOfDay: String?
     public var weeklyLogs: [Bool] // 7 days of current week (Mon..Sun)
+    public var streak: Int
 }
 
 public struct DrawerTaskItem: Identifiable, Sendable, Equatable {
@@ -659,6 +660,17 @@ final class TitroutineClient: ObservableObject {
                     .init(name: "date", value: "lte.\(maxDate)")]
         )) ?? []
 
+        // Query completed logs for the past 365 days to calculate true streak from last missed day
+        let yearAgoDate = Calendar.current.date(byAdding: .day, value: -365, to: Date()) ?? Date()
+        let yearAgoStr = Self.formatDate(yearAgoDate)
+        let allCompletedLogs: [LogRow] = (try? await restGET(
+            table: "habit_logs",
+            query: [.init(name: "user_id", value: "eq.\(userId)"),
+                    .init(name: "select", value: "habit_id,date"),
+                    .init(name: "is_completed", value: "eq.true"),
+                    .init(name: "date", value: "gte.\(yearAgoStr)")]
+        )) ?? []
+
         let today = Self.localToday()
         let jsWeekday = Calendar.current.component(.weekday, from: Date()) - 1
 
@@ -682,6 +694,13 @@ final class TitroutineClient: ObservableObject {
                 logs.contains { $0.habitId == h.id && $0.date == date && $0.isCompleted == true }
             }
 
+            let habitCompletedDates = Set(allCompletedLogs.filter { $0.habitId == h.id }.compactMap { $0.date })
+            let streak = Self.calculateHabitStreak(
+                completedDates: habitCompletedDates,
+                today: today,
+                frequency: h.frequency
+            )
+
             return DrawerHabitItem(
                 id: h.id,
                 title: h.title,
@@ -691,7 +710,8 @@ final class TitroutineClient: ObservableObject {
                 targetCount: targetCount,
                 targetSeconds: targetSeconds,
                 timeOfDay: h.timeOfDay,
-                weeklyLogs: weeklyLogs
+                weeklyLogs: weeklyLogs,
+                streak: streak
             )
         }
     }
@@ -853,6 +873,61 @@ final class TitroutineClient: ObservableObject {
         d.keyDecodingStrategy = .convertFromSnakeCase
         return d
     }()
+
+    private static func formatDate(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar.current
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
+
+    private static func calculateHabitStreak(
+        completedDates: Set<String>,
+        today: String,
+        frequency: HabitFrequency?
+    ) -> Int {
+        var streak = 0
+        let cal = Calendar.current
+        let f = DateFormatter()
+        f.calendar = cal
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+
+        guard var currentDate = f.date(from: today) else { return 0 }
+
+        for i in 0..<365 {
+            let dateStr = f.string(from: currentDate)
+            let isToday = (i == 0)
+            let isCompleted = completedDates.contains(dateStr)
+
+            var isScheduled = true
+            if let freq = frequency, freq.type == "specific_days", let days = freq.days {
+                let jsDay = cal.component(.weekday, from: currentDate) - 1 // 0=Sunday
+                isScheduled = days.contains(jsDay)
+            }
+
+            if isToday {
+                if isCompleted {
+                    streak += 1
+                }
+            } else {
+                if isScheduled {
+                    if isCompleted {
+                        streak += 1
+                    } else {
+                        // Encountered the missed day (ngày mất chuỗi) -> streak ends!
+                        break
+                    }
+                }
+            }
+
+            guard let prev = cal.date(byAdding: .day, value: -1, to: currentDate) else { break }
+            currentDate = prev
+        }
+
+        return streak
+    }
 
     private static func localToday() -> String {
         let f = DateFormatter()

@@ -331,6 +331,21 @@ struct DrawerHabitsView: View {
                     .padding(.leading, 2)
                 }
 
+                // Continuous Habit Streak Badge (from last broken day)
+                if habit.streak > 0 {
+                    HStack(spacing: 1) {
+                        Text("🔥")
+                            .font(.system(size: 8))
+                        Text("\(habit.streak)")
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.orange)
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.12)))
+                    .help("Chuỗi hiện tại: \(habit.streak) ngày liên tục")
+                }
+
                 // Month Calendar Expansion Toggle
                 Button(action: {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
@@ -364,6 +379,9 @@ struct DrawerHabitsView: View {
                         if let idx = habits.firstIndex(where: { $0.id == habit.id }) {
                             habits[idx].isCompleted = willComplete
                         }
+                    },
+                    onRefresh: {
+                        loadHabits()
                     }
                 )
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -476,6 +494,7 @@ struct DrawerHabitsView: View {
 struct HabitMonthGridView: View {
     let habit: DrawerHabitItem
     let onToggleToday: (Bool) -> Void
+    var onRefresh: (() -> Void)? = nil
     @ObservedObject private var settings = EdgeDrawerSettings.shared
 
     @State private var viewDate: Date = Date()
@@ -652,10 +671,15 @@ struct HabitMonthGridView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Color.secondary)
                     Spacer()
-                    if summary.streak > 0 {
-                        Text("🔥 Chuỗi \(summary.streak) ngày")
+                    if habit.streak > 0 {
+                        Text("🔥 Chuỗi hiện tại: \(habit.streak) ngày")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(Color.orange)
+                            .help("Tính liên tục từ ngày mất chuỗi gần nhất hoặc ngày bắt đầu đến nay")
+                    } else if summary.streak > 0 {
+                        Text("Chuỗi trong tháng: \(summary.streak) ngày")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.secondary)
                     }
                 }
                 Text("💡 Chạm vào ngày quá khứ để check-in bù nếu hôm đó quên tích nhé!")
@@ -731,6 +755,9 @@ struct HabitMonthGridView: View {
         Task {
             do {
                 try await TitroutineClient.shared.toggleHabit(habitId: habit.id, date: dateString, willComplete: willComplete)
+                await MainActor.run {
+                    onRefresh?()
+                }
             } catch {
                 // Revert on error
                 await MainActor.run {
